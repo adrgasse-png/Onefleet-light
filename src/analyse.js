@@ -9,7 +9,7 @@ import {
   evaluerTournee, evaluerPlanning, kmEntre, kmLotSeul, estJourFerme, nomFerie, jourOuvre,
 } from "../moteur/engine/jour/index.js";
 import { GPS, cpConnu } from "../moteur/data/gps.js";
-import { manutHeures } from "../moteur/data/referentiels.js";
+import { etpAbaque } from "../moteur/data/referentiels.js";
 
 const up = s => String(s ?? "").toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim();
 const isoD = d => { const x = new Date(d.getTime() + 12 * 3600e3); return x.getFullYear() + "-" + String(x.getMonth() + 1).padStart(2, "0") + "-" + String(x.getDate()).padStart(2, "0"); };
@@ -88,8 +88,28 @@ function capacityOf(h) {
    Les seuils de l'écran sont des RÉGLAGES du moteur, passés en second argument d'`evaluerTournee`
    (jamais en modifiant `moteur/engine/jour/reglages.js`). Les autres (minEmpty, minLoaded, vlMax,
    minEco, gapMax) sont des filtres de lecture du planning et d'affichage, propres à cet outil. */
-const DEFAULTS = { minEmpty: 200, minLoaded: 150, detMax: 500, rend: 300, gapMax: 3, we150: 150, m3PerDay: 20, vlMax: 20, minEco: 50, sameDayVol: 0, flexB: 0 };
-const HEURES_JOUR = 11;
+const DEFAULTS = { minEmpty: 200, minLoaded: 150, detMax: 500, rend: 300, gapMax: 3, we150: 150, prestDef: "STANDING", vlMax: 20, minEco: 50, sameDayVol: 0, flexB: 0 };
+
+/* ===== Abaques OneFleet (version transmise le 02/10/2026, plus récente que celles du moteur extrait) =====
+   Manutention : m³ traités par une personne en une journée de 9 h, au CHARGEMENT ; à la livraison,
+   la cadence du chargement + 20 %. Optimum reprend la cadence de Standing +.
+   Conduite : 9 h de conduite par jour (4 h 30 · pause 45 min · 4 h 30), départ vers 7 h 30, 70 km/h,
+   soit 630 km par jour. */
+const ABAQUES = {
+  journeeH: 9, kmParJour: 630, vitesse: 70, departH: 7.5, bonusLivraison: 0.2,
+  cadenceChg: { ACCESS: 24, "ACCESS+": 22, STANDING: 20, "STANDING+": 16, OPTIMUM: 16 },
+};
+const PRESTATIONS = { ACCESS: "Access", "ACCESS+": "Access +", STANDING: "Standing", "STANDING+": "Standing +", OPTIMUM: "Optimum" };
+/* prestation lue dans le planning (« Standing + », « STD+ », « ACC », « OPT »…) ; null si illisible */
+function prestationDe(v) {
+  const t = up(v).replace(/\s+/g, "");
+  if (!t) return null;
+  const plus = /\+|PLUS$/.test(t);
+  if (/^OPT/.test(t)) return "OPTIMUM";
+  if (/^(STANDING|STAND|STD|ST)/.test(t)) return plus ? "STANDING+" : "STANDING";
+  if (/^(ACCESS|ACCES|ACC|AC)/.test(t)) return plus ? "ACCESS+" : "ACCESS";
+  return null;
+}
 function reglagesMoteur(P) {
   return {
     detourMaxKm: P.detMax,
@@ -97,15 +117,25 @@ function reglagesMoteur(P) {
     coupureChargeeMaxKm: P.we150,
     // La recherche de boucle refuse toujours un garde-fou dépassé (contrat § 5, niveaux.gardes).
     niveaux: { gardes: "refus" },
+    // Abaques de conduite : une journée de travail de 9 h, 630 km au compte juste (9 h × 70 km/h).
+    // Le compte large garde le défaut du moteur (600 km/j, manutention + 15 %), « à confirmer ».
+    heuresJour: ABAQUES.journeeH,
+    comptes: { large: { kmParJour: 600, margeDuree: 0.15 }, juste: { kmParJour: ABAQUES.kmParJour, margeDuree: 0 } },
     // `deuxOpsParJour` reste au défaut du moteur ("toujours", C5 « à caler ») : sa valeur "jamais"
     // compte aussi le débordement d'une livraison sur le lendemain matin, ce qui n'est pas la règle
     // de terrain « pas de rechargement le jour de la livraison A » — appliquée en filtre plus bas.
   };
 }
-/* durée de manutention : la fonction du moteur, avec la cadence de l'écran (m³ par déménageur et par jour) */
-function dureeH(vol, etp, P) {
-  if (vol == null) return 6;
-  return manutHeures(vol, etp, { manutRatio: P.m3PerDay / HEURES_JOUR });
+/* durées de manutention [CHG, LIV] en heures, selon les abaques : volume ÷ (cadence × équipe), sur une
+   journée de 9 h. Équipe lue dans le planning, sinon celle du moteur (2, 3 au-delà de 50 m³). Plancher 2 h
+   (celui du moteur), arrondi au quart d'heure. Volume inconnu : une demi-journée (4 h 30). */
+function durees(lot, P) {
+  const prest = prestationDe(lot.prest) || P.prestDef || "STANDING";
+  if (lot.vol == null) return [ABAQUES.journeeH / 2, ABAQUES.journeeH / 2, prest];
+  const equipe = lot.etp > 0 ? lot.etp : etpAbaque(lot.vol);
+  const cad = ABAQUES.cadenceChg[prest] || ABAQUES.cadenceChg.STANDING;
+  const h = c => Math.max(2, Math.ceil(lot.vol / (c * equipe) * ABAQUES.journeeH * 4) / 4);
+  return [h(cad), h(cad * (1 + ABAQUES.bonusLivraison)), prest];
 }
 
 /* ===== Description d'une tournée pour le moteur ===== */
@@ -114,16 +144,16 @@ function opImposee(date, dur) { return { dureeH: dur, souhaite: date, flex: [dat
 /* l'ANCRE : le dernier chantier du trajet qui rentre à vide, aux dates du planning */
 function lotAnc(anc, truck, P) {
   const la = anc.lots[anc.lots.length - 1];
-  const dur = dureeH(la.vol, la.etp, P);
-  const liv = anc.end > la.d ? opImposee(anc.end, dur) : opLibre(la.d, la.d, workShift(la.d, 3), dur);
-  return { id: "ANC", nom: la.client || "Ancre", agence: truck.base.key, depotCp: truck.base.cp, cpC: la.cpC, cpL: la.cpL, volume: la.vol ?? 0, chg: opImposee(la.d, dur), liv };
+  const [dC, dL] = durees(la, P);
+  const liv = anc.end > la.d ? opImposee(anc.end, dL) : opLibre(la.d, la.d, workShift(la.d, 3), dL);
+  return { id: "ANC", nom: la.client || "Ancre", agence: truck.base.key, depotCp: truck.base.cp, cpC: la.cpC, cpL: la.cpL, volume: la.vol ?? 0, chg: opImposee(la.d, dC), liv };
 }
 /* l'ACCROCHÉ : chargement à sa date (flex 0) ou libre dans ± flex jours ouvrés ; livraison libre ensuite */
 function lotAcc(acc, P, flex) {
-  const dur = dureeH(acc.vol, acc.etp, P);
-  const chg = flex > 0 ? opLibre(acc.d, workShift(acc.d, -flex), workShift(acc.d, flex), dur) : opImposee(acc.d, dur);
+  const [dC, dL] = durees(acc, P);
+  const chg = flex > 0 ? opLibre(acc.d, workShift(acc.d, -flex), workShift(acc.d, flex), dC) : opImposee(acc.d, dC);
   const souhL = acc.d2 && acc.d2 > acc.d ? acc.d2 : acc.d;
-  const liv = opLibre(souhL, chg.flex[0], workShift(acc.d, flex + 6), dur);
+  const liv = opLibre(souhL, chg.flex[0], workShift(acc.d, flex + 6), dL);
   return { id: "ACC", nom: acc.client || "Accroché", agence: acc.agence || "ACC", depotCp: acc.depotCp, cpC: acc.cpC, cpL: acc.cpL, volume: acc.vol ?? 0, chg, liv };
 }
 const ORDRE_SEUL = [{ lot: "ANC", type: "CHG" }, { lot: "ANC", type: "LIV" }];
@@ -133,9 +163,9 @@ function camionDe(truck) { return { id: "pl", agence: truck.base.key, depotCp: t
 /* Le prochain chantier du camion de l'ancre après son trajet : sert au contrôle « camion déjà pris » (evaluerPlanning) */
 function tourneeSuivante(nextLot, truck, P) {
   if (!nextLot) return null;
-  const dur = dureeH(nextLot.vol, nextLot.etp, P);
-  const liv = nextLot.d2 > nextLot.d ? opImposee(nextLot.d2, dur) : opLibre(nextLot.d, nextLot.d, workShift(nextLot.d, 3), dur);
-  return { id: "suivante", camion: camionDe(truck), lots: [{ id: "N", nom: nextLot.client, agence: truck.base.key, depotCp: truck.base.cp, cpC: nextLot.cpC, cpL: nextLot.cpL, volume: nextLot.vol ?? 0, chg: opImposee(nextLot.d, dur), liv }], ordre: [{ lot: "N", type: "CHG" }, { lot: "N", type: "LIV" }] };
+  const [dC, dL] = durees(nextLot, P);
+  const liv = nextLot.d2 > nextLot.d ? opImposee(nextLot.d2, dL) : opLibre(nextLot.d, nextLot.d, workShift(nextLot.d, 3), dL);
+  return { id: "suivante", camion: camionDe(truck), lots: [{ id: "N", nom: nextLot.client, agence: truck.base.key, depotCp: truck.base.cp, cpC: nextLot.cpC, cpL: nextLot.cpL, volume: nextLot.vol ?? 0, chg: opImposee(nextLot.d, dC), liv }], ordre: [{ lot: "N", type: "CHG" }, { lot: "N", type: "LIV" }] };
 }
 
 /* Codes du moteur → libellés courts de l'écran (filtres et compteurs) */
@@ -392,6 +422,6 @@ function analyse(trucks, { centroids, baseOf, params, onProgress }) {
 
 export const Boucles = {
   deptOf, parseTrucksSheet, analyse, up, dayDiff, capacityOf, addD, wd, isOff, nomFerie, jourOuvre, evaluerRetour, searchRoute, flexDates,
-  DEFAULTS, dureeH, volumeDe, cpProche, cpDe, kmEntre, reglagesMoteur, MOTIF,
+  DEFAULTS, ABAQUES, PRESTATIONS, prestationDe, durees, volumeDe, cpProche, cpDe, kmEntre, reglagesMoteur, MOTIF,
 };
 export default Boucles;

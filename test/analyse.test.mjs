@@ -88,3 +88,15 @@ test("volume lu dans le planning : nombre, texte « 30 m3 », ou noté un autre 
   const R = Boucles.analyse(T, { centroids: CENT, baseOf: t => BASES[t.b], params: {} });
   assert.equal(R.lots.find(l => l.client === "MARTIN").vol, 15);
 });
+
+test("abaques de manutention : cadence par prestation, livraison + 20 %, journée de 9 h", () => {
+  const P = { ...Boucles.DEFAULTS };
+  // 30 m³ en Standing à 2 : 30 / (20 × 2) × 9 h = 6 h 45 au chargement ; 30 / (24 × 2) × 9 = 5 h 37 → 5 h 45
+  assert.deepEqual(Boucles.durees({ vol: 30, etp: 2, prest: "STD" }, P), [6.75, 5.75, "STANDING"]);
+  // Optimum = cadence de Standing + (16 m³) ; 60 m³ sans équipe lue → 3 personnes
+  assert.deepEqual(Boucles.durees({ vol: 60, prest: "Optimum" }, P).slice(0, 2), [11.25, 9.5]);
+  // plancher de 2 h ; prestation illisible → celle des réglages
+  assert.equal(Boucles.durees({ vol: 3, etp: 2, prest: "" }, { ...P, prestDef: "ACCESS" })[0], 2);
+  assert.equal(Boucles.prestationDe("Standing +"), "STANDING+");
+  assert.equal(Boucles.prestationDe("acc+"), "ACCESS+");
+});

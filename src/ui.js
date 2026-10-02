@@ -19,8 +19,8 @@ const CENT = {}; Object.entries(BD.dep).forEach(([k, v]) => CENT[k] = [v[0], v[1
 const depName = d => BD.dep[d] ? BD.dep[d][2] : d;
 const hav = (a, b) => { const R = 6371, t = Math.PI / 180, dl = (b[0] - a[0]) * t, dn = (b[1] - a[1]) * t, x = Math.sin(dl / 2) ** 2 + Math.cos(a[0] * t) * Math.cos(b[0] * t) * Math.sin(dn / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(x)); };
 function nearestDept(lat, lon) { let best = null, bd = 1e9; for (const k in CENT) { const x = hav([lat, lon], CENT[k]); if (x < bd) { bd = x; best = k; } } return best; }
-const PKEY = "boucles-params-v6";
-const PDEF = { minEmpty: 200, minLoaded: 150, detMax: 500, rend: 300, gapMax: 3, flexB: 0, sameDayVol: 0, m3PerDay: 20, we150: 150 };
+const PKEY = "boucles-params-v7";
+const PDEF = { minEmpty: 200, minLoaded: 150, detMax: 500, rend: 300, gapMax: 3, flexB: 0, sameDayVol: 0, prestDef: "STANDING", we150: 150 };
 let params = { ...PDEF };
 try { const s = JSON.parse(localStorage.getItem(PKEY) || "null"); if (s) params = { ...params, ...s }; } catch (e) { /* stockage indisponible */ }
 
@@ -134,7 +134,8 @@ function bornesLot(r, lot) {
    (jour ouvré j = [2j, 2j + 2[, soit 7 h → 18 h). Une livraison qui déborde sur le lendemain matin figure
    dans `jours[]` aux deux dates : on la dédoublonne et on ne dessine que son créneau réel. Le reste de la
    journée est de la route, chargée ou à vide selon ce qui est à bord à ce moment-là. */
-const HJ = 11, H0 = 7;
+// abaques de conduite : départ vers 7 h 30, journée de 9 h (la pause de 45 min n'est pas dessinée)
+const HJ = Boucles.ABAQUES.journeeH, H0 = Boucles.ABAQUES.departH;
 const heure = t => { const h = H0 + (t - 2 * Math.floor(t / 2)) / 2 * HJ, hh = Math.floor(h + 1e-6), mm = Math.round((h - hh) * 60); return `${hh} h ${String(mm === 60 ? 0 : mm).padStart(2, "0")}`; };
 function segmentsDe(jours) {
   const vus = new Map(), pleins = [];
@@ -226,7 +227,7 @@ function ganttDe(m, f) {
 const NIV = { refus: "ko", rouge: "ko", orange: "wa", info: "na", ok: "ok" };
 function verdictPill(m) {
   if (!m.ok) return `<span class="vp ko">${esc(WHY[m.why[0]] || m.why[0])}</span>`;
-  return m.serre ? `<span class="vp wa" title="Ne passe qu'au compte serré : 770 km/j, sans marge de manutention">Serré</span>` : `<span class="vp ok" title="Passe avec la marge d'exploitation : 600 km/j, manutention + 15 %">OK</span>`;
+  return m.serre ? `<span class="vp wa" title="Ne passe qu'au compte serré : 630 km/j, sans marge de manutention">Serré</span>` : `<span class="vp ok" title="Passe avec la marge d'exploitation : 600 km/j, manutention + 15 %">OK</span>`;
 }
 function checks(m, vol, cap) {
   const P = params;
@@ -238,9 +239,9 @@ function checks(m, vol, cap) {
     ${vol == null || cap == null ? `<li class="na">Volume à vérifier${vol != null ? ` (${vol} m³, capacité inconnue)` : cap != null ? ` (capacité ${cap} m³, volume non renseigné)` : ""}</li>` : `<li class="ok">ACC ${vol} m³ pour ${cap} m³ de capacité</li>`}
     ${m.det != null ? `<li class="ok">Détour ${nf(m.det)} km (≤ ${nf(P.detMax)})</li>` : ""}
     ${m.rallJ != null ? `<li class="ok">Rendement : ${nf(m.eco)} km évités pour ${f1(m.rallJ)} jour de camion ajouté (minimum ${nf(m.rendMin)})</li>` : ""}
-    ${m.serre ? `<li class="wa">Serré : passe au compte juste (770 km/j, sans marge), pas avec la marge d'exploitation</li>` : ""}
+    ${m.serre ? `<li class="wa">Serré : passe au compte juste (630 km/j, sans marge), pas avec la marge d'exploitation</li>` : ""}
     ${extra > 0 ? `<li class="na">Camion au dépôt ${extra} jour${extra > 1 ? "s" : ""} plus tard que sans l'accroché (${fdw(m.retourSeul)})</li>` : ""}
-    ${m.ajusteAnc ? `<li class="na">Dates de l'ancre relâchées (${m.ajusteAnc}) : celles du planning ne passent pas pour le moteur avec ${P.m3PerDay} m³ par déménageur et par jour</li>` : ""}
+    ${m.ajusteAnc ? `<li class="na">Dates de l'ancre relâchées (${m.ajusteAnc}) : celles du planning ne passent pas pour le moteur avec les abaques de manutention</li>` : ""}
     ${sig}</ul>`;
 }
 const WHY = {
@@ -254,18 +255,24 @@ const vol = v => v != null ? `<span class="vol">${nf(v)} m³</span>` : `<span cl
 const decal = s => s ? `<span class="bdg ko" title="Chargement de l'accroché déplacé : client à prévenir">CHG ACC ${s > 0 ? "+" : "−"}${Math.abs(s)} j</span>` : "";
 
 /* le parcours, dans l'ordre du camion : Dépôt → CHG ANC → LIV ANC → CHG ACC → LIV ACC → Dépôt */
+/* prestation lue dans le planning, ou celle par défaut des réglages (dite « supposée ») */
+const prestLib = v => { const p = Boucles.prestationDe(v); return p ? `, ${Boucles.PRESTATIONS[p]}` : `, ${Boucles.PRESTATIONS[params.prestDef] || "Standing"} <span class="mut">(supposée)</span>`; };
+const fh = h => { const hh = Math.floor(h), mm = Math.round((h - hh) * 60); return mm ? `${hh} h ${String(mm).padStart(2, "0")}` : `${hh} h`; };
 function parcours(m, f) {
   const at = (lot, type) => ((m.r.arrets || []).find(a => a.lot === lot && a.type === type) || {}).date;
-  const arret = (n, role, type, lieu, extra) => `<li class="ar ${ROLE[role]}"><span class="pt ${ROLE[role]}">${n}</span><div><b>${type} ${role}</b> ${esc(lieu)}${extra ? ` · ${extra}` : ""}</div><time>${fdw(at(role, type))}</time></li>`;
+  // durée passée au moteur pour chaque opération (abaques de manutention), et la prestation lue
+  const op = (lot, type) => { const l = (m.entree?.lots || []).find(x => x.id === lot); return l ? l[type === "CHG" ? "chg" : "liv"] : null; };
+  const duree = (lot, type) => { const o = op(lot, type); return o ? `<span class="mut">${fh(o.dureeH)}</span>` : ""; };
+  const arret = (n, role, type, lieu, extra) => `<li class="ar ${ROLE[role]}"><span class="pt ${ROLE[role]}">${n}</span><div><b>${type} ${role}</b> ${esc(lieu)}${extra ? ` · ${extra}` : ""} ${duree(role, type)}</div><time>${fdw(at(role, type))}</time></li>`;
   const troncon = (cls, txt) => `<li class="tr ${cls}"><span></span><div>${txt}</div></li>`;
   const A = f.ANC, B = f.ACC;
   return `<ol class="parc">
     <li class="dp"><span class="pt dp"></span><div><b>Dépôt</b> ${esc(A.agence)}</div></li>
-    ${arret(1, "ANC", "CHG", `${depName(A.c)} (${A.c})`, `${esc(A.client)}${A.vol != null ? `, ${A.vol} m³` : ""}`)}
+    ${arret(1, "ANC", "CHG", `${depName(A.c)} (${A.c})`, `${esc(A.client)}${A.vol != null ? `, ${A.vol} m³` : ""}${prestLib(A.prest)}`)}
     ${troncon("pl", `${nf(A.km || 0)} km chargé`)}
     ${arret(2, "ANC", "LIV", `${depName(A.l)} (${A.l})`)}
     ${troncon("vd", m.repo ? `${nf(m.repo)} km à vide, au lieu de ${nf(m.empty)} km pour rentrer` : `sur place, au lieu de ${nf(m.empty)} km à vide pour rentrer`)}
-    ${arret(3, "ACC", "CHG", `${depName(B.c)} (${B.c})`, `${esc(B.client)}${B.vol != null ? `, ${B.vol} m³` : ""}${m.shift ? ` · <b class="warn">${m.shift > 0 ? "+" : "−"}${Math.abs(m.shift)} j sur la date prévue (${fdw(B.d)}) : client à prévenir</b>` : ""}`)}
+    ${arret(3, "ACC", "CHG", `${depName(B.c)} (${B.c})`, `${esc(B.client)}${B.vol != null ? `, ${B.vol} m³` : ""}${prestLib(B.prest)}${m.shift ? ` · <b class="warn">${m.shift > 0 ? "+" : "−"}${Math.abs(m.shift)} j sur la date prévue (${fdw(B.d)}) : client à prévenir</b>` : ""}`)}
     ${troncon("pl", `${nf(m.loaded)} km chargé`)}
     ${arret(4, "ACC", "LIV", `${depName(B.l)} (${B.l})`)}
     ${troncon("vd", `${nf(m.after)} km à vide`)}
@@ -335,8 +342,8 @@ function filtered() { return RES.matches.filter(m => m.keep && (!agFilter || agL
 function ficheOpp(m) {
   const tA = truckOf(m.anc), tB = truckOf(m.acc), la = m.anc.lots[m.anc.lots.length - 1];
   return {
-    ANC: { agence: agLabel(tA), plaque: tA.plate, client: la.client, c: la.c, l: la.l, vol: la.vol, km: la.km },
-    ACC: { agence: agLabel(tB), client: m.acc.client, c: m.acc.c, l: m.acc.l, vol: m.acc.vol, d: m.acc.d },
+    ANC: { agence: agLabel(tA), plaque: tA.plate, client: la.client, c: la.c, l: la.l, vol: la.vol, km: la.km, prest: la.prest },
+    ACC: { agence: agLabel(tB), client: m.acc.client, c: m.acc.c, l: m.acc.l, vol: m.acc.vol, d: m.acc.d, prest: m.acc.prest },
     cap: m.cap, depotAnc: tA.base.pos, depotAcc: tB.base.pos, accSeul: m.accSeul, camionAcc: `Camion ${esc(agLabel(tB))}`,
   };
 }
@@ -383,7 +390,7 @@ function routeQuery() {
 function ficheRoute(q, c) {
   const tr = c.truck, la = c.T.lots[c.T.lots.length - 1];
   return {
-    ANC: { agence: agLabel(tr), plaque: tr.plate, client: la.client, c: la.c, l: la.l, vol: la.vol, km: la.km },
+    ANC: { agence: agLabel(tr), plaque: tr.plate, client: la.client, c: la.c, l: la.l, vol: la.vol, km: la.km, prest: la.prest },
     ACC: { agence: q.agNom || "Votre agence", client: "Votre chantier", c: q.c, l: q.l, vol: q.vol || null, d: q.date },
     cap: c.cap, depotAnc: tr.base.pos, depotAcc: q.baseA ? CENT[q.baseA] : null, accSeul: !!q.baseA, camionAcc: q.baseA ? "Votre camion" : null,
     ownLegs: q.baseA ? ROUTE.ownLegs : 0, note: `À valider avec l'exploitation de ${esc(agLabel(tr))} : disponibilité réelle du camion et de l'équipe.`,
@@ -471,9 +478,10 @@ syncParams();
 let rerun = null;
 Object.keys(params).forEach(k => {
   const i = $(k); if (!i) return;
-  i.addEventListener(i.type === "checkbox" ? "change" : "input", () => {
-    const v = i.type === "checkbox" ? i.checked : parseFloat(i.value);
-    if (i.type !== "checkbox" && isNaN(v)) return;
+  const choix = i.type === "checkbox" || i.tagName === "SELECT";
+  i.addEventListener(choix ? "change" : "input", () => {
+    const v = i.type === "checkbox" ? i.checked : i.tagName === "SELECT" ? i.value : parseFloat(i.value);
+    if (!choix && isNaN(v)) return;
     params[k] = v; try { localStorage.setItem(PKEY, JSON.stringify(params)); } catch (e) { /* stockage indisponible */ }
     WHY.attente = `attente > ${params.gapMax} j ouvrés`;
     if (!TRUCKS.length) return;

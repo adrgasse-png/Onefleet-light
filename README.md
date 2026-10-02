@@ -36,28 +36,46 @@ node test/fabriquer-plannings.cjs && node test/navigateur.cjs   # essai dans Chr
 
 | | POC v4 | v5 (moteur v2) |
 |---|---|---|
-| Calendrier | simulation maison heure par heure | passe du moteur à la journée, temps continu, livraison qui déborde sur le lendemain matin |
-| Marge | une seule lecture | deux comptes : **au large** (600 km/j, manutention + 15 %) et **au juste** (770 km/j) ; « Serré » quand seul le juste tient |
+| Calendrier | simulation maison heure par heure | passe du moteur en demi-journées, livraison qui déborde sur le lendemain matin |
+| Marge | une seule lecture | deux comptes : **au large** (600 km/j, manutention + 15 %) et **au juste** (630 km/j) ; « Serré » quand seul le juste tient |
 | Week-end et fériés | règle maison | règle d'or du moteur (11 fériés nationaux), coupure chargée et règle des 150 km du moteur |
 | Km évités | formule géométrique entre centres de départements × 1,25 | lots faits seuls − tournée, même passe, retours dépôt du week-end compris, entre codes postaux |
 | Détour, rendement | formule maison | garde-fous G2 / G5 du moteur, greffe par greffe |
 | Camion déjà pris | jour de planning occupé | `evaluerPlanning` contre le chantier suivant du camion |
 | Messages | codes courts | phrases du moteur (signaux), affichées telles quelles |
 
-## Points à trancher (les chiffres en dépendent)
+## Abaques
 
-1. **Manutention : 20 m³ par déménageur et par jour (terrain) contre 10 m³ par heure (moteur), soit 5,5 fois
-   plus lent.** L'outil passe la cadence terrain au moteur (`manutHeures`, réglage `manutRatio`). Avec elle,
-   beaucoup de tournées ne tiennent qu'« au juste » : elles sortent **Serré**. C'est l'écart le plus
-   important entre l'outil et OneFleet, à remonter à l'équipe OneFleet.
-2. **Rendement minimum 300 km/j** (OneFleet : 750). Choix du POC, justifié par les retours réels de Metz
-   2025. Passé au moteur comme réglage ; le moteur lui-même n'est pas modifié.
-3. **Rechargement le jour de la livraison A.** Le réglage `deuxOpsParJour: "jamais"` du moteur compte aussi
-   le débordement d'une livraison sur le lendemain matin, ce qui écartait presque tout. L'outil garde donc
-   la règle du POC (pas de chargement B le jour où la livraison A *commence*), en filtre.
-4. **Dates du chantier A.** Ce sont celles du planning. Si le moteur ne les tient pas (avec la manutention
-   terrain), l'outil relâche le chargement de A, puis sa livraison, et l'écrit dans la fiche.
-5. **Territoire (G1) non appliqué** : les plannings ne donnent pas les zones de chalandise des agences.
+Les abaques du moteur extrait (10 m³ par heure et par déménageur, journée de 11 h, 770 km/j) sont
+**anciennes**. L'outil applique celles transmises le 02/10/2026, **sans modifier le moteur**, par ses
+réglages et ses entrées :
+
+| | Valeur | Comment elle arrive au moteur |
+|---|---|---|
+| Manutention | m³ par personne et par journée de 9 h : Access 24, Access + 22, Standing 20, Standing + 16, Optimum 16 ; livraison = chargement + 20 % | `dureeH` de chaque opération (CHG et LIV séparément), calculée dans `src/analyse.js` (`durees`) ; prestation lue dans le planning, sinon celle des réglages |
+| Journée | 9 h | `heuresJour: 9` |
+| Conduite | 9 h, 70 km/h, 630 km/j, départ vers 7 h 30 | compte juste `kmParJour: 630` ; le compte large reste à 600 km/j + 15 % (défaut du moteur, « à confirmer ») |
+
+## Points à trancher
+
+1. 🔴 **Anomalie du moteur à remonter à OneFleet : la rallonge du rendement (G5) ignore les abaques.**
+   `g2g5Tournee` (`moteur/engine/jour/gardes.js`) calcule `rallongeJ = (détour / 70 + manutAccroche(lot)) / HEURES_JOUR` :
+   la journée est la constante 11 h (pas `reglages.heuresJour`), et `manutAccroche` lit `lot.vol`, alors que les
+   lots du module portent `volume` — elle compte donc toujours le plancher, 2 h + 2 h. Vérifié : un accroché
+   de 5 m³ (2 h par opération) et un de 60 m³ (14 h) ont la même rallonge, 0,412 jour pour 37 km de détour.
+   Conséquence : G5 est plus permissif qu'il ne devrait sur les gros volumes. Non corrigé ici (le moteur
+   n'est pas modifié).
+2. **Rendement minimum 300 km/j** (OneFleet : 750). Choix du POC, calé sur les retours de Metz 2025 avec
+   l'ancienne manutention terrain (20 m³ par personne et par jour, toutes prestations) : à revoir avec les
+   nouvelles abaques, et une fois G5 corrigé.
+3. **Compte large** : 600 km/j + 15 % de marge, défaut du moteur, désormais proche du compte juste (630).
+   Une valeur cohérente avec les nouvelles abaques reste à arbitrer.
+4. **Rechargement le jour de la livraison de l'ancre.** Le réglage `deuxOpsParJour: "jamais"` du moteur compte
+   aussi le débordement d'une livraison sur le lendemain matin. L'outil garde donc la règle du POC (pas de
+   CHG ACC le jour où la LIV ANC *commence*), en filtre.
+5. **Dates de l'ancre.** Ce sont celles du planning. Si le moteur ne les tient pas, l'outil relâche le
+   chargement de l'ancre, puis sa livraison, et l'écrit dans la fiche.
+6. **Territoire (G1) non appliqué** : les plannings ne donnent pas les zones de chalandise des agences.
 
 Le moteur v2 n'est **pas en production** (maquette gelée le 01/10/2026). Les chiffres sont ceux que
 donnerait la v2 dans cet état, sur des distances à vol d'oiseau corrigées (environ 25 % sous la route).
