@@ -97,26 +97,26 @@ function dureeH(vol, etp, P) {
 /* ===== Description d'une tournée pour le moteur ===== */
 function opLibre(souhaite, d0, d1, dur) { return { dureeH: dur, souhaite, flex: [d0, d1], date: null, confirme: false }; }
 function opImposee(date, dur) { return { dureeH: dur, souhaite: date, flex: [date, date], date, confirme: false }; }
-/* le dernier chantier du trajet A, aux dates du planning */
-function lotA(A, truck, P) {
-  const la = A.lots[A.lots.length - 1];
+/* l'ANCRE : le dernier chantier du trajet qui rentre à vide, aux dates du planning */
+function lotAnc(anc, truck, P) {
+  const la = anc.lots[anc.lots.length - 1];
   const dur = dureeH(la.vol, la.etp, P);
-  const liv = A.end > la.d ? opImposee(A.end, dur) : opLibre(la.d, la.d, workShift(la.d, 3), dur);
-  return { id: "A", nom: la.client || "Chantier A", agence: truck.base.key, depotCp: truck.base.cp, cpC: la.cpC, cpL: la.cpL, volume: la.vol ?? 0, chg: opImposee(la.d, dur), liv };
+  const liv = anc.end > la.d ? opImposee(anc.end, dur) : opLibre(la.d, la.d, workShift(la.d, 3), dur);
+  return { id: "ANC", nom: la.client || "Ancre", agence: truck.base.key, depotCp: truck.base.cp, cpC: la.cpC, cpL: la.cpL, volume: la.vol ?? 0, chg: opImposee(la.d, dur), liv };
 }
-/* le chantier B : chargement à sa date (flex 0) ou libre dans ± flex jours ouvrés ; livraison libre ensuite */
-function lotB(B, P, flex) {
-  const dur = dureeH(B.vol, B.etp, P);
-  const chg = flex > 0 ? opLibre(B.d, workShift(B.d, -flex), workShift(B.d, flex), dur) : opImposee(B.d, dur);
-  const souhL = B.d2 && B.d2 > B.d ? B.d2 : B.d;
-  const liv = opLibre(souhL, chg.flex[0], workShift(B.d, flex + 6), dur);
-  return { id: "B", nom: B.client || "Chantier B", agence: B.agence || "B", depotCp: B.depotCp, cpC: B.cpC, cpL: B.cpL, volume: B.vol ?? 0, chg, liv };
+/* l'ACCROCHÉ : chargement à sa date (flex 0) ou libre dans ± flex jours ouvrés ; livraison libre ensuite */
+function lotAcc(acc, P, flex) {
+  const dur = dureeH(acc.vol, acc.etp, P);
+  const chg = flex > 0 ? opLibre(acc.d, workShift(acc.d, -flex), workShift(acc.d, flex), dur) : opImposee(acc.d, dur);
+  const souhL = acc.d2 && acc.d2 > acc.d ? acc.d2 : acc.d;
+  const liv = opLibre(souhL, chg.flex[0], workShift(acc.d, flex + 6), dur);
+  return { id: "ACC", nom: acc.client || "Accroché", agence: acc.agence || "ACC", depotCp: acc.depotCp, cpC: acc.cpC, cpL: acc.cpL, volume: acc.vol ?? 0, chg, liv };
 }
-const ORDRE_SEUL = [{ lot: "A", type: "CHG" }, { lot: "A", type: "LIV" }];
-const ORDRE_RETOUR = [...ORDRE_SEUL, { lot: "B", type: "CHG" }, { lot: "B", type: "LIV" }];
+const ORDRE_SEUL = [{ lot: "ANC", type: "CHG" }, { lot: "ANC", type: "LIV" }];
+const ORDRE_RETOUR = [...ORDRE_SEUL, { lot: "ACC", type: "CHG" }, { lot: "ACC", type: "LIV" }];
 function camionDe(truck) { return { id: "pl", agence: truck.base.key, depotCp: truck.base.cp, capacite: truck.cap ?? null }; }
 
-/* Le prochain chantier du camion A après son trajet : sert au contrôle « camion déjà pris » (evaluerPlanning) */
+/* Le prochain chantier du camion de l'ancre après son trajet : sert au contrôle « camion déjà pris » (evaluerPlanning) */
 function tourneeSuivante(nextLot, truck, P) {
   if (!nextLot) return null;
   const dur = dureeH(nextLot.vol, nextLot.etp, P);
@@ -132,18 +132,18 @@ const MOTIF = {
 };
 const BLOQUANT = s => s.niveau === "refus" || s.niveau === "rouge" || (s.niveau === "orange" && s.code !== "SERRE");
 
-/* Le chantier A et sa base de comparaison (le camion A seul, qui rentre à vide), mémoïsés par trajet.
-   Les dates de A sont celles du planning, un fait. Si le moteur ne les tient pas (manutention
-   plus lente que prévu, chargement noté tard), on relâche d'abord le chargement de A (trois jours
+/* L'ancre et sa base de comparaison (le camion de l'ancre seul, qui rentre à vide), mémoïsés par trajet.
+   Les dates de l'ancre sont celles du planning, un fait. Si le moteur ne les tient pas (manutention
+   plus lente que prévu, chargement noté tard), on relâche d'abord le chargement de l'ancre (trois jours
    ouvrés en arrière), puis sa livraison (deux jours ouvrés en avant) : ce qui compte pour un retour,
    c'est où et quand le camion se libère. `ajuste` le dit à l'écran. */
-function resoudreA(A, truck, P, cache) {
-  const k = A.key ?? A;
+function resoudreAnc(anc, truck, P, cache) {
+  const k = anc.key ?? anc;
   if (cache && cache.has(k)) return cache.get(k);
   const reg = reglagesMoteur(P), cam = camionDe(truck);
   const essai = lot => ({ lot, r: evaluerTournee({ camion: cam, lots: [lot], ordre: ORDRE_SEUL }, reg) });
   const tient = x => x.r.verdict !== "refus" && !x.r.signaux.some(s => s.code === "DATES_INCOMPATIBLES");
-  const l0 = lotA(A, truck, P);
+  const l0 = lotAnc(anc, truck, P);
   let x = essai(l0), ajuste = null;
   if (!tient(x)) {
     const l1 = { ...l0, chg: { ...l0.chg, date: null, flex: [workShift(l0.chg.souhaite, -3), l0.chg.souhaite] } };
@@ -161,12 +161,12 @@ function resoudreA(A, truck, P, cache) {
   return out;
 }
 
-/* évalue « le camion A, qui rentre à vide, prend le chantier B en retour » — par le moteur */
-function evaluerRetour({ A, truck, B, bSolo, nextLot, P, flex, cacheSeul }) {
+/* évalue « le camion de l'ancre, qui rentre à vide, prend l'accroché en retour » — par le moteur */
+function evaluerRetour({ anc, truck, acc, accSeul, nextLot, P, flex, cacheSeul }) {
   const reg = reglagesMoteur(P);
-  const { lot: lA, base, ajuste } = resoudreA(A, truck, P, cacheSeul);
-  const lB = lotB(B, P, flex);
-  const entree = { camion: camionDe(truck), lots: [lA, lB], ordre: ORDRE_RETOUR };
+  const { lot: lAnc, base, ajuste } = resoudreAnc(anc, truck, P, cacheSeul);
+  const lAcc = lotAcc(acc, P, flex);
+  const entree = { camion: camionDe(truck), lots: [lAnc, lAcc], ordre: ORDRE_RETOUR };
   const r = evaluerTournee(entree, reg);
   const signaux = r.signaux.slice();
   // camion déjà pris : la tournée proposée et le chantier suivant du camion, jugés par evaluerPlanning
@@ -175,34 +175,34 @@ function evaluerRetour({ A, truck, B, bSolo, nextLot, P, flex, cacheSeul }) {
     const pl = evaluerPlanning({ tournees: [{ id: "retour", ...entree }, suiv] }, reg, { touchee: "retour" });
     pl.signaux.filter(s => s.code === "CAMION_DEJA_PRIS").forEach(s => signaux.push(s));
   }
-  const g = (r.greffes || []).find(x => x.lot === "B") || {};
+  const g = (r.greffes || []).find(x => x.lot === "ACC") || {};
   const c = r.chiffres || {};
-  // gain : km évités du moteur (lots faits seuls − tournée). Si le camion de B garde sa tournée
-  // (B n'était pas seul sur son trajet), son trajet propre n'est pas économisé : on retire le lot B
+  // gain : km évités du moteur (lots faits seuls − tournée). Si le camion de l'accroché garde sa tournée
+  // (l'accroché n'était pas seul sur son trajet), son trajet propre n'est pas économisé : on retire l'accroché
   // fait seul et on garde son trajet chargé.
-  const kmB = kmEntre(lB.cpC, lB.cpL);
-  const eco = Math.round(bSolo ? c.kmEvites : c.kmEvites - kmLotSeul(lB.depotCp, lB.cpC, lB.cpL) + kmB);
+  const kmAcc = kmEntre(lAcc.cpC, lAcc.cpL);
+  const eco = Math.round(accSeul ? c.kmEvites : c.kmEvites - kmLotSeul(lAcc.depotCp, lAcc.cpC, lAcc.cpL) + kmAcc);
   const why = [];
   signaux.filter(BLOQUANT).forEach(s => { const m = MOTIF[s.code] || s.code; if (!why.includes(m)) why.push(m); });
   if (!why.length && eco < P.minEco) why.push("gain");
   const arr = r.arrets || [];
   const at = (lot, type) => (arr.find(a => a.lot === lot && a.type === type) || {}).date || null;
-  const cDate = at("B", "CHG");
+  const chgAcc = at("ACC", "CHG");
   if (!why.length && c.joursVides > P.gapMax) why.push("attente");
-  // filtre de terrain (règle du POC) : pas de rechargement le jour où A est livré, sauf petit volume
+  // filtre de terrain (règle du POC) : pas de rechargement le jour où l'ancre est livrée, sauf petit volume
   // livré (0 = jamais). Jugé sur le jour où la livraison COMMENCE, celui du planning : si elle déborde
   // sur le lendemain matin, le moteur l'enchaîne avec le chargement et le calendrier le montre.
-  if (!why.length && cDate && cDate === at("A", "LIV") && !(lA.volume <= P.sameDayVol && P.sameDayVol > 0)) why.push("même jour");
+  if (!why.length && chgAcc && chgAcc === at("ANC", "LIV") && !(lAnc.volume <= P.sameDayVol && P.sameDayVol > 0)) why.push("même jour");
   return {
-    ok: !why.length, why, eco, ajusteA: ajuste, verdict: r.verdict, serre: signaux.some(s => s.code === "SERRE"),
+    ok: !why.length, why, eco, ajusteAnc: ajuste, verdict: r.verdict, serre: signaux.some(s => s.code === "SERRE"),
     signaux, r, base, entree,
     det: g.detourKm ?? null, rallJ: g.rallongeJ ?? null, g2: g.g2, g5: g.g5,
     rendMin: g.rallongeJ != null ? Math.round(P.rend * g.rallongeJ) : null,
-    repo: kmEntre(lA.cpL, lB.cpC), loaded: kmB, after: kmEntre(lB.cpL, lA.depotCp), empty: kmEntre(lA.cpL, lA.depotCp),
-    cDate, livA: at("A", "LIV"), livB: at("B", "LIV"), retour: c.retour, retourSeul: base.chiffres?.retour,
+    repo: kmEntre(lAnc.cpL, lAcc.cpC), loaded: kmAcc, after: kmEntre(lAcc.cpL, lAnc.depotCp), empty: kmEntre(lAnc.cpL, lAnc.depotCp),
+    chgAcc, livAnc: at("ANC", "LIV"), livAcc: at("ACC", "LIV"), retour: c.retour, retourSeul: base.chiffres?.retour,
     coupure: c.coupuresDepot > 0, joursVides: c.joursVides, joursCamion: c.joursCamion, joursSeul: base.chiffres?.joursCamion,
-    volOk: truck.cap == null || B.vol == null ? null : B.vol <= truck.cap,
-    shift: cDate ? dayDiff(B.d, cDate) : null,
+    volOk: truck.cap == null || acc.vol == null ? null : acc.vol <= truck.cap,
+    shift: chgAcc ? dayDiff(acc.d, chgAcc) : null,
   };
 }
 
@@ -214,8 +214,8 @@ function searchRoute(res, trucks, q, centroids, params) {
   const P = Object.assign({}, DEFAULTS, params || {});
   if (!centroids[q.c] || !centroids[q.l]) return { err: "départements inconnus" };
   const cpC = cpDe(q.cpC, q.c, centroids), cpL = cpDe(q.cpL, q.l, centroids);
-  const depotA = q.depotCp || null;
-  const B = { c: q.c, l: q.l, cpC, cpL, d: q.date, d2: q.date, vol: q.vol || null, etp: null, client: "Votre chantier", agence: q.excludeKey || "moi", depotCp: depotA || cpC };
+  const depotMoi = q.depotCp || null;
+  const acc = { c: q.c, l: q.l, cpC, cpL, d: q.date, d2: q.date, vol: q.vol || null, etp: null, client: "Votre chantier", agence: q.excludeKey || "moi", depotCp: depotMoi || cpC };
   const out = [], cacheSeul = new Map();
   res.trips.filter(t => t.isEmpty).forEach(T => {
     const tr = trucks[T.truck];
@@ -224,12 +224,12 @@ function searchRoute(res, trucks, q, centroids, params) {
     if (q.excludeKey && tr.base.key === q.excludeKey) return;
     if (kmEntre(T.lots[T.lots.length - 1].cpL, cpC) > P.detMax + 150) return;   // préfiltre large
     if (dayDiff(T.end, q.date) < -q.flex - 1 || dayDiff(T.end, q.date) > q.flex + P.gapMax + 6) return;
-    const ev = evaluerRetour({ A: T, truck: tr, B, bSolo: !!depotA, nextLot: T.next, P, flex: q.flex, cacheSeul });
+    const ev = evaluerRetour({ anc: T, truck: tr, acc, accSeul: !!depotMoi, nextLot: T.next, P, flex: q.flex, cacheSeul });
     const near = !ev.ok && ev.why.length === 1 && ev.eco > 0;
-    if (ev.ok || near) out.push(Object.assign({ T, truck: tr, near, cap: tr.cap }, ev, { shift: ev.cDate ? dayDiff(q.date, ev.cDate) : null }));
+    if (ev.ok || near) out.push(Object.assign({ T, truck: tr, near, cap: tr.cap }, ev, { shift: ev.chgAcc ? dayDiff(q.date, ev.chgAcc) : null }));
   });
   out.sort((x, y) => (x.near - y.near) || (x.serre - y.serre) || y.eco - x.eco);
-  return { list: out.filter(x => !x.near).concat(out.filter(x => x.near).slice(0, 5)), loaded: kmEntre(cpC, cpL), ownLegs: depotA ? kmEntre(depotA, cpC) + kmEntre(cpL, depotA) : 0 };
+  return { list: out.filter(x => !x.near).concat(out.filter(x => x.near).slice(0, 5)), loaded: kmEntre(cpC, cpL), ownLegs: depotMoi ? kmEntre(depotMoi, cpC) + kmEntre(cpL, depotMoi) : 0 };
 }
 
 /* lit un onglet de mois : renvoie les camions et leurs blocs jour */
@@ -333,37 +333,37 @@ function analyse(trucks, { centroids, baseOf, params, onProgress }) {
     // le chantier suivant du camion (contrôle « camion déjà pris »)
     tr.next = (lotsByTruck.get(tr.truck) || []).filter(l => l.d > tr.end && !tr.lots.includes(l)).sort((a, b) => a.d < b.d ? -1 : 1)[0] || null;
   });
-  // rapprochements : un trajet qui rentre à vide (A) × un lot d'un autre camion (B) chargeant près de la dernière livraison de A
+  // rapprochements : un trajet qui rentre à vide (l'ancre) × un lot d'un autre camion (l'accroché) chargeant près de la dernière livraison de l'ancre
   const lotTrip = new Map(); trips.forEach(tr => tr.lots.forEach(l => lotTrip.set(l, tr)));
   const matches = [], excluded = {}; const exc = w => { excluded[w] = (excluded[w] || 0) + 1; };
   const cacheSeul = new Map();
   let evals = 0;
   const empties = trips.filter(tr => tr.isEmpty);
-  empties.forEach((A, ia) => {
-    const tA = trucks[A.truck];
+  empties.forEach((anc, ia) => {
+    const tAnc = trucks[anc.truck];
     if (onProgress) onProgress(ia, empties.length);
-    if (tA.cap != null && tA.cap <= P.vlMax) return; // les véhicules légers ne font pas de boucle
-    const lastA = A.lots[A.lots.length - 1];
-    lots.forEach(B => {
-      if (B.truck === A.truck || B.km == null || B.km < P.minLoaded || !B.cpC || !B.cpL) return;
-      const gap = dayDiff(A.end, B.d); if (gap < -P.flexB - 2 || gap > P.gapMax + P.flexB + 4) return;   // préfiltre large
-      const tB = trucks[B.truck]; if (!tB.base || !tB.base.cp) return;
-      if (tA.base.key === tB.base.key) return; // retours uniquement : pas d'enchaînement au départ de la même agence
-      // B doit être un départ de sa propre agence : un lot chargé loin de son dépôt est déjà le retour chargé d'un autre camion
-      if (kmEntre(tB.base.cp, B.cpC) > P.minEmpty) return;
-      if (kmEntre(lastA.cpL, B.cpC) > P.detMax) return;
-      const trB = lotTrip.get(B), bSolo = !trB || trB.lots.length === 1;
+    if (tAnc.cap != null && tAnc.cap <= P.vlMax) return; // les véhicules légers ne font pas de boucle
+    const derAnc = anc.lots[anc.lots.length - 1];
+    lots.forEach(acc => {
+      if (acc.truck === anc.truck || acc.km == null || acc.km < P.minLoaded || !acc.cpC || !acc.cpL) return;
+      const gap = dayDiff(anc.end, acc.d); if (gap < -P.flexB - 2 || gap > P.gapMax + P.flexB + 4) return;   // préfiltre large
+      const tAcc = trucks[acc.truck]; if (!tAcc.base || !tAcc.base.cp) return;
+      if (tAnc.base.key === tAcc.base.key) return; // retours uniquement : pas d'enchaînement au départ de la même agence
+      // l'accroché doit être un départ de sa propre agence : un lot chargé loin de son dépôt est déjà le retour chargé d'un autre camion
+      if (kmEntre(tAcc.base.cp, acc.cpC) > P.minEmpty) return;
+      if (kmEntre(derAnc.cpL, acc.cpC) > P.detMax) return;
+      const trAcc = lotTrip.get(acc), accSeul = !trAcc || trAcc.lots.length === 1;
       evals++;
-      const ev = evaluerRetour({ A, truck: tA, B: { ...B, agence: tB.base.key, depotCp: tB.base.cp }, bSolo, nextLot: A.next, P, flex: P.flexB, cacheSeul });
+      const ev = evaluerRetour({ anc, truck: tAnc, acc: { ...acc, agence: tAcc.base.key, depotCp: tAcc.base.cp }, accSeul, nextLot: anc.next, P, flex: P.flexB, cacheSeul });
       if (!ev.ok) { exc(ev.why[0]); return; }
-      matches.push(Object.assign({ A, B, type: "inter-agences", bSolo, cap: tA.cap }, ev));
+      matches.push(Object.assign({ anc, acc, type: "inter-agences", accSeul, cap: tAnc.cap }, ev));
     });
   });
   // tri : ce qui tient au large d'abord, puis le gain
   matches.sort((a, b) => (a.serre - b.serre) || b.eco - a.eco);
-  // total sans double compte : chaque trajet A et chaque lot B utilisés une fois
-  const usedA = new Set(), usedB = new Set(); let ecoTot = 0, kept = 0;
-  matches.forEach(m => { if (usedA.has(m.A) || usedB.has(m.B)) return; usedA.add(m.A); usedB.add(m.B); m.keep = true; ecoTot += m.eco; kept++; });
+  // total sans double compte : chaque ancre et chaque accroché utilisés une fois
+  const usedAnc = new Set(), usedAcc = new Set(); let ecoTot = 0, kept = 0;
+  matches.forEach(m => { if (usedAnc.has(m.anc) || usedAcc.has(m.acc)) return; usedAnc.add(m.anc); usedAcc.add(m.acc); m.keep = true; ecoTot += m.eco; kept++; });
   return {
     lots, trips, matches, P, evals,
     kpi: {

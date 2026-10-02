@@ -10,6 +10,7 @@
   --info:#086882; --info-bg:#DFEAED; --info-border:#B3C6DA;
   --role-ancre:#086882; --role-ancre-bg:#DFEAED; --role-acc:#65B32E; --role-acc-bg:#EEF7E7; --role-acc-ink:#3F7A1B; --role-on:#FFFFFF;
   --boucle-retour:#534AB7; --accent-violet-bg:#EEEDFE;
+  --client-bar:#5B7083; --client-bar-boucle:#65B32E;
   --route-fill:#D9E1E4; --route-ink:#0F1B20; --empty-fill:#F1F5F6; --empty-line:#B9C7CC;
   --hatch-void:repeating-linear-gradient(135deg,var(--empty-line) 0 1px,transparent 1px 8px);
   --closed:repeating-linear-gradient(45deg,transparent 0 4px,var(--line) 4px 6px);
@@ -76,105 +77,139 @@ label.btn:focus-within{outline:2px solid var(--info)}
 .kpi .hl b{color:var(--primary)}
 .kpi .xs{grid-column:1/-1;background:var(--warning-bg);border-color:var(--warning-border);font-size:13.5px}
 
-/* carte et fiche */
-.main{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:16px;align-items:start}
-.main>*{min-width:0}
+/* ── liste à gauche, fiche à droite : la liste reste en place quand on change de proposition ── */
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px}
-.map{padding:8px;position:relative}
-.map svg{width:100%;height:auto;display:block}
-.map .land{fill:var(--land);stroke:var(--landline);stroke-width:1.2}
-.map path.loadA,.map path.loadB,.map path.empty,.map path.repo,.map path.after,.map path.emptyB{fill:none;stroke-linecap:round}
-.map path.loadA{stroke:var(--role-ancre);stroke-width:3}
-.map path.loadB{stroke:var(--role-acc);stroke-width:3.5}
-.map path.empty{stroke:var(--destructive);stroke-width:2.5;stroke-dasharray:6 5}
-.map path.empty.thin{stroke-width:1.2;opacity:.45;stroke-dasharray:none}
-.map path.repo{stroke:var(--ink2);stroke-width:2;stroke-dasharray:2 4}
-.map path.after{stroke:var(--ink2);stroke-width:1.5;stroke-dasharray:6 5;opacity:.75}
-.map path.emptyB{stroke:var(--destructive);stroke-width:1;opacity:.35;stroke-dasharray:2 4}
-.map rect.base{fill:var(--ink);stroke:var(--panel);stroke-width:1.5}
-.map rect.base.b2{fill:var(--role-acc-ink)}
-.map text.bl,.pin text{font:600 12px "Barlow Semi Condensed",sans-serif;fill:var(--ink);paint-order:stroke;stroke:var(--panel);stroke-width:3px}
-.pin circle{stroke:var(--panel);stroke-width:1.5}.pin.a circle{fill:var(--role-ancre)}.pin.b circle{fill:var(--role-acc)}
-.pin text.n{font:700 10px "Barlow Semi Condensed",sans-serif;fill:var(--role-on);stroke:none;text-anchor:middle}
-.map circle.cand{fill:var(--role-acc);stroke:var(--panel);stroke-width:1.5}.map circle.cand.near{fill:var(--warning)}
-.legend{display:flex;flex-wrap:wrap;gap:6px 16px;padding:6px 10px 8px;font-size:13px;color:var(--ink2)}
-.lg{display:inline-block;width:22px;height:0;border-top:3px solid;margin-right:6px;vertical-align:middle}
-.lg.loadA{border-color:var(--role-ancre)}.lg.loadB{border-color:var(--role-acc)}.lg.empty{border-color:var(--destructive);border-top-style:dashed}.lg.repo{border-color:var(--ink2);border-top-style:dotted}.lg.after{border-color:var(--ink2);border-top-style:dashed;opacity:.75}
-.dotc{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--role-acc);margin-right:6px}.dotc.near{background:var(--warning)}
+.md{display:grid;grid-template-columns:minmax(300px,380px) minmax(0,1fr);gap:16px;align-items:start}
+.md>*{min-width:0}
+.plist{position:sticky;top:12px;display:flex;flex-direction:column;max-height:calc(100vh - 24px);overflow:hidden}
+.pl-h{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:12px 12px 10px;border-bottom:1px solid var(--line)}
+.pl-h h2{font:700 17px "Barlow Semi Condensed",sans-serif;margin:0}
+.pl-h select{border:1px solid var(--line2);background:var(--panel);color:var(--ink);border-radius:8px;padding:4px 6px;font:500 13px "Barlow",sans-serif;max-width:55%}
+.pl-s{overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:6px;overscroll-behavior:contain}
+.pl-k{margin:0;padding:6px 12px 8px;border-top:1px solid var(--line);font-size:11.5px;color:var(--ink3)}
+.pad{padding:8px}
+.pc{display:block;width:100%;text-align:left;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);padding:8px 10px;cursor:pointer;font:inherit;font-size:13px}
+.pc:hover{border-color:var(--line2);background:var(--bg)}
+.pc.on{border-color:var(--role-acc);box-shadow:inset 3px 0 0 var(--role-acc);background:var(--role-acc-bg)}
+.pc.near{opacity:.75}
+.pc-top{display:flex;align-items:baseline;gap:6px;margin-bottom:4px}
+.pc-top b{font:700 18px "Barlow Semi Condensed",sans-serif;color:var(--primary);font-variant-numeric:tabular-nums}
+.pc-top .vp{margin-left:auto}
+.pc-l{display:flex;align-items:center;gap:6px;margin:2px 0;min-width:0}
+.pc-l .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pc-l .dt{color:var(--ink2);white-space:nowrap;font-size:12px}
+.pc-b{display:flex;flex-wrap:wrap;gap:2px 6px;align-items:center;margin-top:4px;font-size:12px}
+.mut{color:var(--ink2)}
 
-.detail{padding:16px 18px}
-.detail h3{font:700 22px/1.15 "Barlow Semi Condensed",sans-serif;margin:6px 0 0}
-.detail h3 .gain{color:var(--primary)}
-.detail h3 small{font-size:14px;color:var(--ink2);font-weight:600}
-.detail .meta,.meta{color:var(--ink2);font-size:13px;margin:4px 0 12px}
-.ph{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.tb{display:inline-block;background:var(--boucle-retour);color:#fff;border-radius:4px;padding:1px 8px;font:700 12px "Barlow Semi Condensed",sans-serif;letter-spacing:.04em;text-transform:uppercase}
-.vp{display:inline-block;border-radius:999px;padding:1px 10px;font:600 12.5px "Barlow Semi Condensed",sans-serif;border:1px solid;white-space:nowrap}
+/* pastilles de rôle (guidelines § 9.1) : aplat saturé, texte blanc */
+.pa{display:inline-flex;align-items:center;justify-content:center;flex:none;min-width:30px;height:17px;padding:0 5px;border-radius:4px;font:700 10.5px "Barlow Semi Condensed",sans-serif;letter-spacing:.04em;color:var(--role-on)}
+.pa.anc{background:var(--role-ancre)}.pa.acc{background:var(--role-acc)}
+.vp{display:inline-block;border-radius:999px;padding:0 9px;font:600 12px/18px "Barlow Semi Condensed",sans-serif;border:1px solid;white-space:nowrap}
 .vp.ok{background:var(--success-bg);color:var(--primary);border-color:var(--success-border)}
 .vp.wa{background:var(--warning-bg);color:var(--warning);border-color:var(--warning-border)}
 .vp.ko{background:var(--destructive-bg);color:var(--destructive);border-color:var(--destructive-border)}
-.lead2{font-size:14.5px;line-height:1.5;margin:8px 0 12px}
+.bdg{display:inline-block;border-radius:999px;padding:0 7px;font-size:11.5px;font-weight:600;white-space:nowrap}
+.bdg.ok{background:var(--success-bg);color:var(--primary)}.bdg.ko{background:var(--destructive-bg);color:var(--destructive)}.bdg.na{background:var(--warning-bg);color:var(--warning)}
 .warn{color:var(--destructive)}
-.steps{margin:12px 0;padding-left:20px;font-size:14px;line-height:1.6}
 
-/* calendrier jour par jour (jours[] du moteur) */
-.tl{display:grid;gap:3px;margin:6px 0 4px;font-size:11.5px;overflow-x:auto;padding-bottom:2px}
-.tl-row{display:grid;grid-template-columns:112px repeat(var(--n),minmax(50px,1fr));gap:3px}
-.tl-lab{font-size:12px;line-height:1.2;padding:3px 4px 3px 0}.tl-lab b{display:block}.tl-lab span{color:var(--ink2)}
-.tl-d{text-align:center;color:var(--ink2);font-size:11px;padding:2px 0;border-radius:4px}.tl-d b{display:block;color:var(--ink);font-size:13px}
-.tl-d i{display:block;font-style:normal;font-size:10px;color:var(--warning)}
-.tl-d.we{background:var(--line)}
-.tl-c{min-height:34px;border-radius:5px;background:var(--bg);padding:3px 4px;line-height:1.15;display:flex;align-items:center;justify-content:center;text-align:center;border:1px solid transparent}
-.tl-c.we{background:var(--closed)}
-.tl-c.op.anc{background:var(--role-ancre-bg);border-left:3px solid var(--role-ancre);color:var(--role-ancre);font-weight:600}
-.tl-c.op.acc{background:var(--role-acc-bg);border-left:3px solid var(--role-acc);color:var(--role-acc-ink);font-weight:600}
-.tl-c.rt{background:var(--route-fill);color:var(--route-ink)}
-.tl-c.vd{background:var(--hatch-void),var(--empty-fill);border-color:var(--empty-line);color:var(--ink2)}
-.tl-c.dp{background:var(--ink);color:var(--bg);font-weight:700}
-.tl-c.dp.ch{background:var(--ink);box-shadow:inset 0 -3px 0 var(--role-acc)}
-.tl-c.at{background:var(--warning-bg);color:var(--warning)}
-.tl-c.lib{background:var(--success-bg);color:var(--primary)}
-.tl-c.fin{box-shadow:inset -4px 0 0 var(--ink)}
-.tl-key{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11.5px;color:var(--ink2);margin:0 0 10px}
-.tl-key i.k{display:inline-block;width:14px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px;border:1px solid transparent}
-.k.op.anc{background:var(--role-ancre-bg);border-left:3px solid var(--role-ancre)}.k.op.acc{background:var(--role-acc-bg);border-left:3px solid var(--role-acc)}
-.k.rt{background:var(--route-fill)}.k.vd{background:var(--hatch-void),var(--empty-fill);border-color:var(--empty-line)}.k.dp{background:var(--ink)}.k.we{background:var(--closed),var(--bg);border-color:var(--line)}
+/* ── la fiche ── */
+.pdet{padding:14px 16px 12px}
+.pdet .vide h3{font:700 20px "Barlow Semi Condensed",sans-serif;margin:0 0 4px}
+.f-head{display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;padding-bottom:12px;border-bottom:1px solid var(--line);margin-bottom:12px}
+.f-km b{display:block;font:700 30px/1 "Barlow Semi Condensed",sans-serif;color:var(--primary);font-variant-numeric:tabular-nums}
+.f-km span{font-size:12px;color:var(--ink2)}
+.f-roles{flex:1;min-width:240px;display:flex;flex-direction:column;gap:4px;font-size:14px}
+.f-roles>div{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px}
+.f-v{display:flex;gap:6px;align-items:center}
+.f-grid{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:16px;align-items:start;margin-top:12px}
+.meta{color:var(--ink2);font-size:12.5px;margin:10px 0 0}
+code{font-size:.92em}
+
+/* ── Gantt (guidelines § 9) : barre client au-dessus, arrêt en arête du rôle, trajet plein ou hachuré ── */
+.gantt{display:flex;flex-direction:column;gap:6px;overflow-x:auto;padding-bottom:2px}
+.g-row{display:grid;grid-template-columns:118px repeat(var(--n),minmax(52px,1fr));column-gap:2px;row-gap:2px;min-width:calc(118px + var(--n) * 54px)}
+.g-head{position:sticky;top:0}
+.g-lab{font-size:12px;line-height:1.2;padding:2px 6px 2px 0;align-self:center}.g-lab b{display:block}.g-lab span{color:var(--ink2)}
+.g-d{text-align:center;color:var(--ink2);font-size:11px;padding:2px 0;border-radius:4px}.g-d b{display:block;color:var(--ink);font-size:13px}
+.g-d i{display:block;font-style:normal;font-size:10px;color:var(--warning)}
+.g-d.ferme{background:var(--closed),var(--bg)}
+.g-band{display:flex;align-items:center;gap:5px;min-width:0;height:20px;border-radius:4px;padding:0 6px 0 3px;background:var(--client-bar);color:#fff;font:600 11.5px "Barlow Semi Condensed",sans-serif;overflow:hidden;white-space:nowrap}
+.g-band.bcl{background:var(--client-bar-boucle)}
+.g-band span:last-child{overflow:hidden;text-overflow:ellipsis}
+.g-band .pa{height:14px;min-width:26px;font-size:9.5px;box-shadow:0 0 0 1px rgba(255,255,255,.6)}
+.g-c{min-height:36px;border-radius:4px;background:var(--bg);padding:2px 3px;line-height:1.1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;font-size:11px;font-variant-numeric:tabular-nums}
+.g-c.ferme{background:var(--closed),var(--bg)}
+.g-c.op{font:700 11px "Barlow Semi Condensed",sans-serif;letter-spacing:.02em}
+.g-c.op.anc{background:var(--role-ancre-bg);box-shadow:inset 3px 0 0 var(--role-ancre);color:var(--role-ancre)}
+.g-c.op.acc{background:var(--role-acc-bg);box-shadow:inset 3px 0 0 var(--role-acc);color:var(--role-acc-ink)}
+.g-c.pl{background:var(--route-fill);color:var(--route-ink)}
+.g-c.vd{background:var(--hatch-void),var(--empty-fill);box-shadow:inset 0 0 0 1px var(--empty-line);color:var(--ink2)}
+.g-c.dp{background:var(--ink);color:var(--bg);font-weight:700}
+.g-c.dp.ch{box-shadow:inset 0 -3px 0 var(--role-acc)}
+.g-c.at{background:var(--warning-bg);color:var(--warning)}
+.g-c.lib{background:var(--success-bg);color:var(--primary)}
+.g-c.fin{box-shadow:inset -4px 0 0 var(--ink)}
+.g-c.op.anc.fin{box-shadow:inset 3px 0 0 var(--role-ancre),inset -4px 0 0 var(--ink)}
+.g-c.op.acc.fin{box-shadow:inset 3px 0 0 var(--role-acc),inset -4px 0 0 var(--ink)}
+.g-truck.attenue{opacity:.62}
+.g-key{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11.5px;color:var(--ink2);margin:6px 0 0}
+.g-key i.k{display:inline-block;width:14px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.k.op.anc{background:var(--role-ancre-bg);box-shadow:inset 3px 0 0 var(--role-ancre)}.k.op.acc{background:var(--role-acc-bg);box-shadow:inset 3px 0 0 var(--role-acc)}
+.k.pl{background:var(--route-fill)}.k.vd{background:var(--hatch-void),var(--empty-fill);box-shadow:inset 0 0 0 1px var(--empty-line)}.k.dp{background:var(--ink)}.k.ferme{background:var(--closed),var(--bg);box-shadow:inset 0 0 0 1px var(--line)}
+
+/* ── le parcours : Dépôt → CHG ANC → LIV ANC → CHG ACC → LIV ACC → Dépôt ── */
+.parc{list-style:none;margin:10px 0 0;padding:0;font-size:13.5px}
+.parc li{display:grid;grid-template-columns:22px 1fr auto;gap:8px;align-items:center}
+.parc li.ar,.parc li.dp{padding:3px 0}
+.parc li time{color:var(--ink2);font-size:12.5px;white-space:nowrap}
+.parc .pt{width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font:700 11px "Barlow Semi Condensed",sans-serif;color:var(--role-on)}
+.parc .pt.anc{background:var(--role-ancre)}.parc .pt.acc{background:var(--role-acc)}.parc .pt.dp{background:var(--ink);border-radius:3px;width:14px;height:14px;margin:0 3px}
+.parc li.tr{color:var(--ink2);font-size:12.5px}
+.parc li.tr span{justify-self:center;width:6px;height:22px;border-radius:3px}
+.parc li.tr.pl span{background:var(--route-fill)}
+.parc li.tr.vd span{background:var(--hatch-void),var(--empty-fill);box-shadow:inset 0 0 0 1px var(--empty-line)}
+.parc li.tr.lib{background:var(--success-bg);border-radius:6px;padding:4px 6px;margin-top:6px;color:var(--ink)}
+.parc li.tr.lib{grid-template-columns:1fr}
+.parc li.tr.lib span{display:none}
 
 /* contrôles : une ligne par règle, couleur par niveau de signal */
-.checks{list-style:none;padding:0;margin:4px 0 10px;font-size:13.5px;display:flex;flex-direction:column;gap:3px}
-.checks li{padding-left:18px;position:relative}
+.checks{list-style:none;padding:0;margin:0;font-size:13px;display:flex;flex-direction:column;gap:3px}
+.checks li{padding-left:16px;position:relative}
 .checks li::before{position:absolute;left:0;top:0}
 .checks .ok{color:var(--primary)}.checks .ok::before{content:"✓"}
-.checks .wa{color:var(--warning)}.checks .wa::before{content:"!"; font-weight:700}
+.checks .wa{color:var(--warning)}.checks .wa::before{content:"!";font-weight:700}
 .checks .ko{color:var(--destructive);font-weight:600}.checks .ko::before{content:"✕"}
 .checks .na{color:var(--ink2)}.checks .na::before{content:"·"}
 
-/* déroulé A → B */
-.seq{list-style:none;padding:0;margin:12px 0;font-size:14px}
-.seq li{display:flex;gap:8px;align-items:flex-start;padding:6px 10px;margin-bottom:6px;background:var(--bg);border-radius:6px}
-.rl{flex:none;display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;border-radius:10px;font:700 11px "Barlow Semi Condensed",sans-serif;color:var(--role-on);padding:0 6px;margin-top:1px}
-.rl.anc{background:var(--role-ancre)}.rl.acc{background:var(--role-acc)}.rl.r{background:var(--ink3)}.rl.x{background:var(--ink2)}.rl.g{background:var(--primary)}
-.seq li.g{background:var(--success-bg)}
+/* ── carte : points numérotés dans l'ordre du parcours, couleur du rôle ── */
+.map svg{width:100%;height:auto;display:block}
+.map.mini{border:1px solid var(--line);border-radius:8px;padding:4px;background:var(--bg)}
+.map .land{fill:var(--land);stroke:var(--landline);stroke-width:1.2}
+.map path.t-anc,.map path.t-acc,.map path.t-vd,.map path.t-evite{fill:none;stroke-linecap:round}
+.map path.t-anc{stroke:var(--role-ancre);stroke-width:5}
+.map path.t-acc{stroke:var(--role-acc);stroke-width:5}
+.map path.t-vd{stroke:var(--ink2);stroke-width:2;stroke-dasharray:2 5}
+.map path.t-evite{stroke:var(--empty-line);stroke-width:3;stroke-dasharray:7 6}
+.map path.t-evite.fin{stroke-width:1.2;opacity:.8}
+.map rect.base{fill:var(--ink);stroke:var(--panel);stroke-width:1.5}
+.map rect.base.acc{fill:var(--ink2)}
+.map text.bl{font:600 22px "Barlow Semi Condensed",sans-serif;fill:var(--ink);paint-order:stroke;stroke:var(--panel);stroke-width:5px}
+.pt-c circle{stroke:var(--panel);stroke-width:2}.pt-c.anc circle{fill:var(--role-ancre)}.pt-c.acc circle{fill:var(--role-acc)}
+.pt-c text.n{font:700 15px "Barlow Semi Condensed",sans-serif;fill:var(--role-on);text-anchor:middle}
+.legend{display:flex;flex-wrap:wrap;gap:4px 12px;padding:4px 6px 2px;font-size:11.5px;color:var(--ink2)}
+.lg{display:inline-block;width:18px;height:0;border-top:3px solid;margin-right:5px;vertical-align:middle}
+.lg.anc{border-color:var(--role-ancre)}.lg.acc{border-color:var(--role-acc)}.lg.vd{border-color:var(--ink2);border-top-style:dotted}.lg.evite{border-color:var(--empty-line);border-top-style:dashed}
 
-/* listes */
+/* listes des onglets Retours à vide et Contrôle */
 .list{margin-top:16px;padding:14px 0 10px}
 .list h2{font:700 18px "Barlow Semi Condensed",sans-serif;margin:0 16px 10px}
 .hscroll{position:relative;overflow-x:auto;-webkit-overflow-scrolling:touch}
-.list table{border-collapse:collapse;min-width:900px;margin:0 12px;font-size:14px;font-variant-numeric:tabular-nums}
+.list table{border-collapse:collapse;min-width:700px;margin:0 12px;font-size:14px;font-variant-numeric:tabular-nums}
 .list td,.list th{padding:7px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
 .list th{font:600 13px "Barlow Semi Condensed",sans-serif;color:var(--ink2)}
 .list td.num{text-align:right;white-space:nowrap}
-.list td.num b{color:var(--primary)}
-.list tr[data-i],.list tr[data-r]{cursor:pointer}
-.list tr[data-i]:hover td,.list tr[data-r]:hover td{background:var(--bg)}
-.list tr.on td{background:var(--success-bg)}
-.list tr.near td{color:var(--ink2)}
 .list td.stick,.list th.stick{position:sticky;left:0;background:var(--panel);z-index:1}
-.list tr.on td.stick{background:var(--success-bg)}
-.lhead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px;margin-right:16px}
-.filters select{border:1px solid var(--line2);background:var(--panel);color:var(--ink);border-radius:8px;padding:5px 8px;font:500 14px "Barlow",sans-serif}
-.bdg{display:inline-block;border-radius:999px;padding:1px 8px;font-size:12px;font-weight:600;margin:1px 4px 1px 0;white-space:nowrap}
-.bdg.ok{background:var(--success-bg);color:var(--primary)}.bdg.ko{background:var(--destructive-bg);color:var(--destructive)}.bdg.na{background:var(--warning-bg);color:var(--warning)}
+.steps{margin:12px 0;padding-left:20px;font-size:14px;line-height:1.6}
 
 /* formulaire « Ouvrir une route » */
 .form{padding:14px 16px;margin-bottom:16px}
@@ -196,7 +231,9 @@ details.rules summary{padding:14px 16px;cursor:pointer;font:700 16px "Barlow Sem
 .note{color:var(--ink2);font-size:13px;margin:14px 2px 0;max-width:80ch}
 
 @media (max-width:860px){
-  .main{grid-template-columns:1fr}
+  .md{grid-template-columns:1fr}
+  .plist{position:static;max-height:46vh}
+  .f-grid{grid-template-columns:1fr}
   h1{font-size:28px}
   .kpi{grid-template-columns:repeat(2,1fr)}
   .navrow{flex-direction:column}

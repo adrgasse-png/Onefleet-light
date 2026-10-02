@@ -12,14 +12,20 @@ const { chromium } = require((() => { try { return require.resolve("playwright")
   await p.waitForFunction(() => /lus? en/.test(document.getElementById("msg").textContent), null, { timeout: 60000 });
   console.log("MSG:", await p.textContent("#msg"));
   console.log("KPI:", (await p.textContent("#kpi")).replace(/\s+/g, " "));
-  console.log("ROWS:", await p.$$eval(".list tbody tr", t => t.map(r => r.innerText.replace(/\s+/g, " "))));
+  console.log("PROPS:", await p.$$eval(".pl-s .pc", t => t.map(r => r.innerText.replace(/\s+/g, " "))));
+  // sélection au clavier : ↓ passe à la proposition suivante, la fiche suit, la liste n'est pas redessinée
+  const avant = await p.textContent("#pdet .f-head");
+  await p.focus(".pl-s .pc.on"); await p.keyboard.press("ArrowDown");
+  const apres = await p.textContent("#pdet .f-head");
+  console.log("CLAVIER:", avant !== apres ? "la fiche change" : "ÉCHEC : la fiche ne change pas", "| focus:", await p.evaluate(() => document.activeElement.classList.contains("on")));
+  await p.keyboard.press("ArrowUp");
   await p.screenshot({ path: (process.argv[2] || "test/captures") + "/opp.png", fullPage: true });
   await p.click('[data-tab="route"]');
   await p.fill("#rC", "13100"); await p.fill("#rL", "57"); await p.fill("#rDate", "2026-10-07"); await p.fill("#rFlex", "2"); await p.fill("#rVol", "20");
   await p.selectOption("#rAg", { label: "Dazin" });
   await p.click("#rGo");
   await p.waitForTimeout(500);
-  console.log("ROUTE:", (await p.textContent(".detail")).replace(/\s+/g, " ").slice(0, 600));
+  console.log("ROUTE:", (await p.textContent("#pdet")).replace(/\s+/g, " ").slice(0, 600));
   await p.screenshot({ path: (process.argv[2] || "test/captures") + "/route.png", fullPage: true });
   await p.click('[data-tab="ctrl"]'); console.log("CTRL:", (await p.textContent("#pane")).replace(/\s+/g, " ").slice(0, 900));
   await p.setViewportSize({ width: 390, height: 900 }); await p.click('[data-tab="opp"]');

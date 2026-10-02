@@ -26,7 +26,7 @@ node test/fabriquer-plannings.cjs && node test/navigateur.cjs   # essai dans Chr
 |---|---|
 | `moteur/` | **copie à l'identique** de `v2/src` de l'extrait `onefleet-moteur-boucles` du 02/10/2026 (version dans `moteur/VERSION.txt`). Ne pas modifier : voir `CLAUDE.md` |
 | `src/analyse.js` | lecture des plannings, trajets, retours à vide (repris du POC) ; **adaptateur vers le moteur** : décrit chaque piste comme une tournée, lit le verdict |
-| `src/ui.js`, `src/styles.css`, `src/index.html` | l'interface ; couleurs de la charte OneFleet (`moteur/styles/tokens.js`) |
+| `src/ui.js`, `src/styles.css`, `src/index.html` | l'interface, au vocabulaire et à la charte OneFleet (`moteur/styles/tokens.js`, `docs/regles-metier.md` § « rôles ») : **ANC** (ancre, le camion qui rentre à vide) et **ACC** (accroché, le chantier repris), arrêts CHG / LIV, Gantt à barres client, liste des propositions à gauche (↑ ↓) et fiche à droite |
 | `src/carte.json` | fond de carte, centres de départements, référentiel des dépôts (repris du POC) |
 | `vendor/` | SheetJS et JSZip, tels qu'embarqués dans le POC |
 | `docs/` | `regles-metier.md` (règles du moteur en production) et `moteur-CLAUDE.md` (mode d'emploi de l'extrait) |

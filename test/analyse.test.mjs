@@ -28,7 +28,7 @@ test("un retour Metz ← Marseille est trouvé et jugé par le moteur", () => {
   assert.equal(R.kpi.emptyTrips >= 1, true);
   const m = R.matches.find(x => x.keep);
   assert.ok(m, "au moins un retour possible");
-  assert.equal(m.B.client, "MARTIN");
+  assert.equal(m.acc.client, "MARTIN");
   assert.ok(["ok", "info", "orange"].includes(m.verdict));
   assert.ok(m.eco > 0);
   assert.ok(Array.isArray(m.r.jours) && m.r.jours.length > 0, "le calendrier vient du moteur");
@@ -68,8 +68,8 @@ test("règle des 150 km : un retour qui finirait loin du dépôt un vendredi est
 test("camion déjà pris : le chantier suivant du camion A est jugé par evaluerPlanning", () => {
   const T = camions();
   const R = Boucles.analyse(T, { centroids: CENT, baseOf: t => BASES[t.b], params: {} });
-  const A = R.trips.find(t => t.lots[0].client === "DUPONT"), B = R.lots.find(l => l.client === "MARTIN");
-  const args = { A, truck: T[0], B: { ...B, agence: "MRS", depotCp: BASES.MRS.cp }, bSolo: true, P: { ...Boucles.DEFAULTS }, flex: 0 };
+  const anc = R.trips.find(t => t.lots[0].client === "DUPONT"), acc = R.lots.find(l => l.client === "MARTIN");
+  const args = { anc, truck: T[0], acc: { ...acc, agence: "MRS", depotCp: BASES.MRS.cp }, accSeul: true, P: { ...Boucles.DEFAULTS }, flex: 0 };
   assert.ok(Boucles.evaluerRetour({ ...args, nextLot: null }).ok, "sans chantier suivant, le retour tient");
   // le camion de Metz doit charger à Metz le jeu. 15/10 : le retour le laisse à Lyon ce jour-là
   const suivant = { client: "SUIVANT", d: "2026-10-15", d2: "2026-10-15", cpC: BASES.METZ.cp, cpL: "69003", vol: 15, etp: 2 };
