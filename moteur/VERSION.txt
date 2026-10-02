@@ -1,0 +1,9 @@
+Extrait du dépôt onefleet-web, branche v2/tournee-editable (« la tournée éditable »)
+Commit   : f76b9d2829199a1103b4cd138e219054bf8eab0f
+Extrait  : 2026-10-02
+État     : PAS EN PRODUCTION. Maquette gelée le 2026-10-01, portage dans l'application en cours :
+           les règles et les réglages peuvent encore bouger.
+Contenu  : le module de calcul à la journée (src/engine/jour), la recherche de boucle v2
+           (src/engine/v2), ce dont ils dépendent, et les trois modules du banc de cas réels
+           utilisés par potentiel-v2.mjs (scripts/banc/lib).
+Ajout    : potentiel-v2.mjs n'existe pas dans le dépôt, il a été écrit pour ce paquet.

@@ -1,0 +1,382 @@
+/* Cœur d'analyse des retours à vide.
+   - Lecture des plannings (blocs camion × jour), trajets, retours à vide : propre à cet outil.
+   - Jugement d'un retour (« le camion A, qui rentre à vide, prend le chantier B ») : délégué au
+     moteur v2 de OneFleet (`moteur/engine/jour`, `evaluerTournee` et `evaluerPlanning`), copié à
+     l'identique dans `moteur/`. Aucune règle de calendrier, de détour, de rendement, de week-end
+     ou de capacité n'est réécrite ici : on décrit la tournée, le moteur rend le verdict.
+   Fonctionne dans le navigateur (bundle IIFE `Boucles`) et sous Node (tests). */
+import {
+  evaluerTournee, evaluerPlanning, kmEntre, kmLotSeul, estJourFerme, nomFerie,
+} from "../moteur/engine/jour/index.js";
+import { GPS, cpConnu } from "../moteur/data/gps.js";
+import { manutHeures } from "../moteur/data/referentiels.js";
+
+const up = s => String(s ?? "").toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim();
+const isoD = d => { const x = new Date(d.getTime() + 12 * 3600e3); return x.getFullYear() + "-" + String(x.getMonth() + 1).padStart(2, "0") + "-" + String(x.getDate()).padStart(2, "0"); };
+const dayDiff = (a, b) => Math.round((new Date(b + "T12:00") - new Date(a + "T12:00")) / 864e5);
+const addD = (s, n) => { const d = new Date(s + "T12:00"); d.setDate(d.getDate() + n); return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0"); };
+const wd = s => new Date(s + "T12:00").getDay();
+// Jours fermés : ceux du moteur (week-ends et 11 fériés nationaux).
+const isOff = s => estJourFerme(s);
+const nextWork = s => { let d = addD(s, 1); while (isOff(d)) d = addD(d, 1); return d; };
+const prevWork = s => { let d = addD(s, -1); while (isOff(d)) d = addD(d, -1); return d; };
+const workShift = (s, n) => { let d = s; for (let k = 0; k < Math.abs(n); k++) d = n > 0 ? nextWork(d) : prevWork(d); return d; };
+function havVol(a, b) { const R = 6371, t = Math.PI / 180, dl = (b[0] - a[0]) * t, dn = (b[1] - a[1]) * t, x = Math.sin(dl / 2) ** 2 + Math.cos(a[0] * t) * Math.cos(b[0] * t) * Math.sin(dn / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(x)); }
+
+/* ===== Codes postaux : le moteur raisonne en CP, les plannings en départements ===== */
+const GPS_KEYS = Object.keys(GPS).filter(k => !k.startsWith("97"));
+const CP_PROCHE = new Map();
+/* CP du référentiel du moteur le plus proche d'un point (dépôt d'agence, centre de département) */
+function cpProche(lat, lon) {
+  const k = lat.toFixed(3) + "," + lon.toFixed(3);
+  if (CP_PROCHE.has(k)) return CP_PROCHE.get(k);
+  let best = null, bd = 1e9;
+  for (const cp of GPS_KEYS) { const d = havVol([lat, lon], GPS[cp]); if (d < bd) { bd = d; best = cp; } }
+  CP_PROCHE.set(k, best);
+  return best;
+}
+/* CP d'une cellule de planning : le CP saisi s'il est connu du moteur, sinon le CP le plus proche du centre du département */
+function cpDe(raw, dept, centroids) {
+  if (raw != null && raw !== "") {
+    const s = typeof raw === "number" ? String(raw).padStart(5, "0") : String(raw).trim();
+    if (/^\d{5}$/.test(s) && cpConnu(s) && GPS[s]) return s;
+  }
+  if (typeof dept === "string" && centroids[dept]) return cpProche(centroids[dept][0], centroids[dept][1]);
+  return null;
+}
+
+/* département à partir d'une cellule : 2 chiffres, code postal 5 chiffres (zéro initial perdu par Excel), 2A/2B, dépôt */
+function deptOf(v) {
+  if (v == null || v === "") return null;
+  if (typeof v === "number") {
+    if (!Number.isInteger(v)) return null;
+    if (v >= 1000 && v <= 99999) { const s = String(v).padStart(5, "0"); if (s.startsWith("20")) return +s.slice(2, 3) <= 1 ? "2A" : "2B"; if (s.startsWith("97")) return { dom: true }; return s.slice(0, 2); }
+    if (v >= 1 && v <= 95 && v !== 20) return String(v).padStart(2, "0");
+    return null;
+  }
+  const s = up(v);
+  if (/^(DEPOT|DEPÔT|GM|GARDE ?MEUBLE|SELF|AGENCE)$/.test(s)) return "BASE";
+  if (/^2A$|^2B$/.test(s)) return s;
+  if (/^\d{5}$/.test(s)) return deptOf(+s);
+  if (/^\d{1,2}$/.test(s)) return deptOf(+s);
+  if (/^I[- ]/.test(s)) return { intl: true };
+  return null;
+}
+/* capacité en m³ lue dans l'en-tête camion : « EY 441 WT 50H+50 » = 50 + 50 (remorque) ; « … 20 » = 20 m³ */
+function capacityOf(h) {
+  if (!h) return null;
+  const r = up(h).replace(/[A-Z]{2}[ -]?\d{3}[ -]?[A-Z]{2}/, "").replace(/\b\d{3,4} ?[A-Z]{2,3} ?\d{2}\b/, "");
+  const n = (r.match(/\d{1,3}/g) || []).map(Number).filter(x => x >= 3 && x <= 120);
+  return n.length ? n.reduce((a, b) => a + b, 0) : null;
+}
+
+/* ===== Réglages =====
+   Les seuils de l'écran sont des RÉGLAGES du moteur, passés en second argument d'`evaluerTournee`
+   (jamais en modifiant `moteur/engine/jour/reglages.js`). Les autres (minEmpty, minLoaded, vlMax,
+   minEco, gapMax) sont des filtres de lecture du planning et d'affichage, propres à cet outil. */
+const DEFAULTS = { minEmpty: 200, minLoaded: 150, detMax: 500, rend: 300, gapMax: 3, we150: 150, m3PerDay: 20, vlMax: 20, minEco: 50, sameDayVol: 0, flexB: 0 };
+const HEURES_JOUR = 11;
+function reglagesMoteur(P) {
+  return {
+    detourMaxKm: P.detMax,
+    rendementMinKmJ: P.rend,
+    coupureChargeeMaxKm: P.we150,
+    // La recherche de boucle refuse toujours un garde-fou dépassé (contrat § 5, niveaux.gardes).
+    niveaux: { gardes: "refus" },
+    // `deuxOpsParJour` reste au défaut du moteur ("toujours", C5 « à caler ») : sa valeur "jamais"
+    // compte aussi le débordement d'une livraison sur le lendemain matin, ce qui n'est pas la règle
+    // de terrain « pas de rechargement le jour de la livraison A » — appliquée en filtre plus bas.
+  };
+}
+/* durée de manutention : la fonction du moteur, avec la cadence de l'écran (m³ par déménageur et par jour) */
+function dureeH(vol, etp, P) {
+  if (vol == null) return 6;
+  return manutHeures(vol, etp, { manutRatio: P.m3PerDay / HEURES_JOUR });
+}
+
+/* ===== Description d'une tournée pour le moteur ===== */
+function opLibre(souhaite, d0, d1, dur) { return { dureeH: dur, souhaite, flex: [d0, d1], date: null, confirme: false }; }
+function opImposee(date, dur) { return { dureeH: dur, souhaite: date, flex: [date, date], date, confirme: false }; }
+/* le dernier chantier du trajet A, aux dates du planning */
+function lotA(A, truck, P) {
+  const la = A.lots[A.lots.length - 1];
+  const dur = dureeH(la.vol, la.etp, P);
+  const liv = A.end > la.d ? opImposee(A.end, dur) : opLibre(la.d, la.d, workShift(la.d, 3), dur);
+  return { id: "A", nom: la.client || "Chantier A", agence: truck.base.key, depotCp: truck.base.cp, cpC: la.cpC, cpL: la.cpL, volume: la.vol ?? 0, chg: opImposee(la.d, dur), liv };
+}
+/* le chantier B : chargement à sa date (flex 0) ou libre dans ± flex jours ouvrés ; livraison libre ensuite */
+function lotB(B, P, flex) {
+  const dur = dureeH(B.vol, B.etp, P);
+  const chg = flex > 0 ? opLibre(B.d, workShift(B.d, -flex), workShift(B.d, flex), dur) : opImposee(B.d, dur);
+  const souhL = B.d2 && B.d2 > B.d ? B.d2 : B.d;
+  const liv = opLibre(souhL, chg.flex[0], workShift(B.d, flex + 6), dur);
+  return { id: "B", nom: B.client || "Chantier B", agence: B.agence || "B", depotCp: B.depotCp, cpC: B.cpC, cpL: B.cpL, volume: B.vol ?? 0, chg, liv };
+}
+const ORDRE_SEUL = [{ lot: "A", type: "CHG" }, { lot: "A", type: "LIV" }];
+const ORDRE_RETOUR = [...ORDRE_SEUL, { lot: "B", type: "CHG" }, { lot: "B", type: "LIV" }];
+function camionDe(truck) { return { id: "pl", agence: truck.base.key, depotCp: truck.base.cp, capacite: truck.cap ?? null }; }
+
+/* Le prochain chantier du camion A après son trajet : sert au contrôle « camion déjà pris » (evaluerPlanning) */
+function tourneeSuivante(nextLot, truck, P) {
+  if (!nextLot) return null;
+  const dur = dureeH(nextLot.vol, nextLot.etp, P);
+  const liv = nextLot.d2 > nextLot.d ? opImposee(nextLot.d2, dur) : opLibre(nextLot.d, nextLot.d, workShift(nextLot.d, 3), dur);
+  return { id: "suivante", camion: camionDe(truck), lots: [{ id: "N", nom: nextLot.client, agence: truck.base.key, depotCp: truck.base.cp, cpC: nextLot.cpC, cpL: nextLot.cpL, volume: nextLot.vol ?? 0, chg: opImposee(nextLot.d, dur), liv }], ordre: [{ lot: "N", type: "CHG" }, { lot: "N", type: "LIV" }] };
+}
+
+/* Codes du moteur → libellés courts de l'écran (filtres et compteurs) */
+const MOTIF = {
+  Q17: "week-end", COUPURE_CHARGEE_LOIN: "150 km", CAPACITE: "volume", DATES_INCOMPATIBLES: "date", DATE_NON_OUVREE: "jour fermé",
+  FLEX_INTENABLE: "date", KM_EVITES_NEGATIFS: "gain", SANS_GAIN: "gain", DETOUR: "détour", RENDEMENT: "rendement",
+  CAMION_DEJA_PRIS: "camion pris", CP_INCONNU: "CP inconnu", ORDRE_INVALIDE: "ordre", HORS_FLEX: "date", TERRITOIRE: "territoire",
+};
+const BLOQUANT = s => s.niveau === "refus" || s.niveau === "rouge" || (s.niveau === "orange" && s.code !== "SERRE");
+
+/* Le chantier A et sa base de comparaison (le camion A seul, qui rentre à vide), mémoïsés par trajet.
+   Les dates de A sont celles du planning, un fait. Si le moteur ne les tient pas (manutention
+   plus lente que prévu, chargement noté tard), on relâche d'abord le chargement de A (trois jours
+   ouvrés en arrière), puis sa livraison (deux jours ouvrés en avant) : ce qui compte pour un retour,
+   c'est où et quand le camion se libère. `ajuste` le dit à l'écran. */
+function resoudreA(A, truck, P, cache) {
+  const k = A.key ?? A;
+  if (cache && cache.has(k)) return cache.get(k);
+  const reg = reglagesMoteur(P), cam = camionDe(truck);
+  const essai = lot => ({ lot, r: evaluerTournee({ camion: cam, lots: [lot], ordre: ORDRE_SEUL }, reg) });
+  const tient = x => x.r.verdict !== "refus" && !x.r.signaux.some(s => s.code === "DATES_INCOMPATIBLES");
+  const l0 = lotA(A, truck, P);
+  let x = essai(l0), ajuste = null;
+  if (!tient(x)) {
+    const l1 = { ...l0, chg: { ...l0.chg, date: null, flex: [workShift(l0.chg.souhaite, -3), l0.chg.souhaite] } };
+    const x1 = essai(l1);
+    if (tient(x1)) { x = x1; ajuste = "chargement"; }
+    else {
+      const d = l0.liv.souhaite;
+      const l2 = { ...l1, liv: { ...l0.liv, date: null, flex: [d, workShift(d, 2)] } };
+      const x2 = essai(l2);
+      if (tient(x2)) { x = x2; ajuste = "livraison"; }
+    }
+  }
+  const out = { lot: x.lot, base: x.r, ajuste };
+  if (cache) cache.set(k, out);
+  return out;
+}
+
+/* évalue « le camion A, qui rentre à vide, prend le chantier B en retour » — par le moteur */
+function evaluerRetour({ A, truck, B, bSolo, nextLot, P, flex, cacheSeul }) {
+  const reg = reglagesMoteur(P);
+  const { lot: lA, base, ajuste } = resoudreA(A, truck, P, cacheSeul);
+  const lB = lotB(B, P, flex);
+  const entree = { camion: camionDe(truck), lots: [lA, lB], ordre: ORDRE_RETOUR };
+  const r = evaluerTournee(entree, reg);
+  const signaux = r.signaux.slice();
+  // camion déjà pris : la tournée proposée et le chantier suivant du camion, jugés par evaluerPlanning
+  const suiv = tourneeSuivante(nextLot, truck, P);
+  if (suiv && r.verdict !== "refus") {
+    const pl = evaluerPlanning({ tournees: [{ id: "retour", ...entree }, suiv] }, reg, { touchee: "retour" });
+    pl.signaux.filter(s => s.code === "CAMION_DEJA_PRIS").forEach(s => signaux.push(s));
+  }
+  const g = (r.greffes || []).find(x => x.lot === "B") || {};
+  const c = r.chiffres || {};
+  // gain : km évités du moteur (lots faits seuls − tournée). Si le camion de B garde sa tournée
+  // (B n'était pas seul sur son trajet), son trajet propre n'est pas économisé : on retire le lot B
+  // fait seul et on garde son trajet chargé.
+  const kmB = kmEntre(lB.cpC, lB.cpL);
+  const eco = Math.round(bSolo ? c.kmEvites : c.kmEvites - kmLotSeul(lB.depotCp, lB.cpC, lB.cpL) + kmB);
+  const why = [];
+  signaux.filter(BLOQUANT).forEach(s => { const m = MOTIF[s.code] || s.code; if (!why.includes(m)) why.push(m); });
+  if (!why.length && eco < P.minEco) why.push("gain");
+  const arr = r.arrets || [];
+  const at = (lot, type) => (arr.find(a => a.lot === lot && a.type === type) || {}).date || null;
+  const cDate = at("B", "CHG");
+  if (!why.length && c.joursVides > P.gapMax) why.push("attente");
+  // filtre de terrain (règle du POC) : pas de rechargement le jour où A est livré, sauf petit volume
+  // livré (0 = jamais). Jugé sur le jour où la livraison COMMENCE, celui du planning : si elle déborde
+  // sur le lendemain matin, le moteur l'enchaîne avec le chargement et le calendrier le montre.
+  if (!why.length && cDate && cDate === at("A", "LIV") && !(lA.volume <= P.sameDayVol && P.sameDayVol > 0)) why.push("même jour");
+  return {
+    ok: !why.length, why, eco, ajusteA: ajuste, verdict: r.verdict, serre: signaux.some(s => s.code === "SERRE"),
+    signaux, r, base, entree,
+    det: g.detourKm ?? null, rallJ: g.rallongeJ ?? null, g2: g.g2, g5: g.g5,
+    rendMin: g.rallongeJ != null ? Math.round(P.rend * g.rallongeJ) : null,
+    repo: kmEntre(lA.cpL, lB.cpC), loaded: kmB, after: kmEntre(lB.cpL, lA.depotCp), empty: kmEntre(lA.cpL, lA.depotCp),
+    cDate, livA: at("A", "LIV"), livB: at("B", "LIV"), retour: c.retour, retourSeul: base.chiffres?.retour,
+    coupure: c.coupuresDepot > 0, joursVides: c.joursVides, joursCamion: c.joursCamion, joursSeul: base.chiffres?.joursCamion,
+    volOk: truck.cap == null || B.vol == null ? null : B.vol <= truck.cap,
+    shift: cDate ? dayDiff(B.d, cDate) : null,
+  };
+}
+
+/* dates candidates (affichage) : la date prévue, puis ±1, ±2… jours ouvrés */
+function flexDates(d0, flex) { const out = [d0]; let a = d0, b = d0; for (let k = 0; k < flex; k++) { a = prevWork(a); b = nextWork(b); out.push(b, a); } return out; }
+
+/* recherche « j'ouvre une route » : mon chantier devient le retour d'un camion d'une autre agence */
+function searchRoute(res, trucks, q, centroids, params) {
+  const P = Object.assign({}, DEFAULTS, params || {});
+  if (!centroids[q.c] || !centroids[q.l]) return { err: "départements inconnus" };
+  const cpC = cpDe(q.cpC, q.c, centroids), cpL = cpDe(q.cpL, q.l, centroids);
+  const depotA = q.depotCp || null;
+  const B = { c: q.c, l: q.l, cpC, cpL, d: q.date, d2: q.date, vol: q.vol || null, etp: null, client: "Votre chantier", agence: q.excludeKey || "moi", depotCp: depotA || cpC };
+  const out = [], cacheSeul = new Map();
+  res.trips.filter(t => t.isEmpty).forEach(T => {
+    const tr = trucks[T.truck];
+    if (!tr.base || !tr.base.cp) return;
+    if (tr.cap != null && tr.cap <= P.vlMax) return;
+    if (q.excludeKey && tr.base.key === q.excludeKey) return;
+    if (kmEntre(T.lots[T.lots.length - 1].cpL, cpC) > P.detMax + 150) return;   // préfiltre large
+    if (dayDiff(T.end, q.date) < -q.flex - 1 || dayDiff(T.end, q.date) > q.flex + P.gapMax + 6) return;
+    const ev = evaluerRetour({ A: T, truck: tr, B, bSolo: !!depotA, nextLot: T.next, P, flex: q.flex, cacheSeul });
+    const near = !ev.ok && ev.why.length === 1 && ev.eco > 0;
+    if (ev.ok || near) out.push(Object.assign({ T, truck: tr, near, cap: tr.cap }, ev, { shift: ev.cDate ? dayDiff(q.date, ev.cDate) : null }));
+  });
+  out.sort((x, y) => (x.near - y.near) || (x.serre - y.serre) || y.eco - x.eco);
+  return { list: out.filter(x => !x.near).concat(out.filter(x => x.near).slice(0, 5)), loaded: kmEntre(cpC, cpL), ownLegs: depotA ? kmEntre(depotA, cpC) + kmEntre(cpL, depotA) : 0 };
+}
+
+/* lit un onglet de mois : renvoie les camions et leurs blocs jour */
+function parseTrucksSheet(X, ws, planning) {
+  const R = X.utils.decode_range(ws["!ref"]);
+  void R;
+  const g = (r, c) => { const x = ws[X.utils.encode_cell({ r, c })]; return x && x.t !== "e" ? x.v : undefined; };
+  // lignes de séparation (MMM / MME / N) et colonnes de début de camion
+  const sepCount = {}; const startCols = new Set();
+  for (const k in ws) {
+    if (k[0] === "!") continue;
+    const x = ws[k];
+    if (x.t === "s" && up(x.v) === "MMM") { const p = X.utils.decode_cell(k); if (up(g(p.r, p.c + 1)) === "MME") { sepCount[p.r] = (sepCount[p.r] || 0) + 1; startCols.add(p.c); } }
+  }
+  const seps = Object.keys(sepCount).map(Number).filter(r => sepCount[r] >= 2).sort((a, b) => a - b);
+  if (!seps.length || !startCols.size) return null;
+  const cols = [...startCols].sort((a, b) => a - b), firstTruck = cols[0];
+  // date de chaque bloc : une date dans la zone résumé (avant la 1re colonne camion) entre deux séparateurs
+  const blocks = []; let prev = seps[0] - (seps.length > 1 ? seps[1] - seps[0] : 13);
+  for (const s of seps) {
+    let d = null;
+    for (let r = Math.max(0, prev + 1); r < s && !d; r++) for (let c = 0; c < firstTruck && !d; c++) { const v = g(r, c); if (v instanceof Date) d = isoD(v); }
+    blocks.push({ r0: Math.max(0, prev + 1), r1: s - 1, d }); prev = s;
+  }
+  const hdrTop = Math.max(0, blocks[0].r0 - 1);
+  const trucks = [];
+  cols.forEach(c => {
+    // en-tête : agence, chauffeur, immatriculation au-dessus du premier bloc
+    const hdr = []; for (let r = 0; r <= Math.min(hdrTop, 8); r++) { const v = g(r, c); if (v != null && v !== "" && typeof v === "string") hdr.push(v.trim()); }
+    const plate = hdr.find(h => /[A-Z]{2}[ -]?\d{3}[ -]?[A-Z]{2}|\d{3,4} ?[A-Z]{2,3} ?\d{2}/.test(up(h))) || "";
+    const agency = hdr.find(h => h !== plate && !/^besoin$/i.test(h) && !/^\d+$/.test(h)) || "";
+    const days = [];
+    blocks.forEach(b => {
+      if (!b.d) return;
+      const lines = []; for (let r = b.r0; r <= b.r1; r++) lines.push([g(r, c), g(r, c + 1), g(r, c + 2)]);
+      // le lot : première ligne où les deux premières cellules sont des départements, suivie du nom du client
+      let lot = null; const text = [];
+      for (let i = 0; i < lines.length; i++) {
+        const [a, b2] = lines[i];
+        if (!lot) {
+          const dc = deptOf(a), dl = deptOf(b2); const cli = lines[i + 1] && lines[i + 1][0];
+          if (dc && dl && typeof cli === "string" && cli.trim() && deptOf(cli) === null) {
+            if (/^SUITE\b/.test(up(cli))) { text.push("suite"); i += 2; continue; } // jour de suite d'un chantier déjà lu
+            const vol = lines[i + 2] && typeof lines[i + 2][0] === "number" ? lines[i + 2][0] : null, etp = lines[i + 2] && typeof lines[i + 2][1] === "number" ? lines[i + 2][1] : null;
+            lot = { c: dc, l: dl, cRaw: a, lRaw: b2, prest: typeof lines[i][2] === "string" ? lines[i][2].trim() : "", client: cli.trim(), vol, etp }; i += 2; continue;
+          }
+        }
+        lines[i].forEach(v => { if (typeof v === "string" && v.trim() && !/^(P|CC|R)$/.test(v.trim())) text.push(v.trim()); });
+      }
+      const t = up(text.join(" "));
+      days.push({ d: b.d, lot, active: !!lot || /\b(ROUTE|LIV|RETOUR|CHG|CHGT|CHARG)/.test(t), retour: /\bRETOUR\b/.test(t) });
+    });
+    if (plate || days.some(x => x.lot)) trucks.push({ planning, col: c, plate, agency, cap: capacityOf(plate), days });
+  });
+  return { trucks, dates: blocks.map(b => b.d).filter(Boolean) };
+}
+
+/* trajets, retours à vide, rapprochements */
+function analyse(trucks, { centroids, baseOf, params, onProgress }) {
+  const P = Object.assign({}, DEFAULTS, params || {});
+  const cpOf = (raw, d) => cpDe(raw, d, centroids);
+  const lots = [], trips = [];
+  trucks.forEach((t, ti) => {
+    const base = baseOf(t); t.base = base;
+    const ds = t.days.slice().sort((a, b) => a.d < b.d ? -1 : 1);
+    // dédoublonnage : un même lot répété sur plusieurs jours (chargement puis livraison) = un seul lot
+    const seen = new Map();
+    ds.forEach(x => {
+      if (!x.lot) return;
+      const L = x.lot, k = up(L.client) + "|" + (L.c.dom || L.c.intl ? "X" : L.c) + "|" + (L.l.dom || L.l.intl ? "X" : L.l);
+      const p = seen.get(k);
+      if (p && dayDiff(p.d2, x.d) <= 2) { p.d2 = x.d; x.dup = p; return; }
+      const c = L.c === "BASE" ? (base && base.dept) : L.c, l = L.l === "BASE" ? (base && base.dept) : L.l;
+      const cpC = L.c === "BASE" ? base && base.cp : cpOf(L.cRaw, c), cpL = L.l === "BASE" ? base && base.cp : cpOf(L.lRaw, l);
+      const o = { id: lots.length, truck: ti, planning: t.planning, agency: t.agency, plate: t.plate, d: x.d, d2: x.d, client: L.client, c, l, cpC, cpL, vol: L.vol, etp: L.etp, prest: L.prest, km: cpC && cpL ? kmEntre(cpC, cpL) : null };
+      lots.push(o); seen.set(k, o); x.lotRef = o;
+    });
+    // trajets : suite de jours actifs (écart ≤ 2 jours) commençant par un lot longue distance
+    let cur = null;
+    ds.forEach(x => {
+      const L = x.lotRef || (x.dup || null);
+      if (cur && dayDiff(cur.end, x.d) > 2) { trips.push(cur); cur = null; }
+      if (!x.active && !L) return;
+      if (!cur) { if (L && L.km != null && L.km >= P.minLoaded) cur = { truck: ti, lots: [L], start: x.d, end: x.d }; return; }
+      cur.end = x.d; if (L && !cur.lots.includes(L)) cur.lots.push(L);
+      if (L && L.km != null && L.km < P.minLoaded && base && base.cp && L.cpC && kmEntre(L.cpC, base.cp) < P.minEmpty) { trips.push(cur); cur = null; }
+    });
+    if (cur) trips.push(cur);
+  });
+  // retour à vide de chaque trajet : distance de la dernière livraison au dépôt
+  const lotsByTruck = new Map();
+  lots.forEach(l => { if (!lotsByTruck.has(l.truck)) lotsByTruck.set(l.truck, []); lotsByTruck.get(l.truck).push(l); });
+  trips.forEach((tr, i) => {
+    const t = trucks[tr.truck], last = tr.lots[tr.lots.length - 1];
+    tr.key = i; tr.lastL = last.l;
+    const bcp = t.base && t.base.cp;
+    tr.empty = bcp && last.cpL ? kmEntre(last.cpL, bcp) : null;
+    tr.hasReturnLoad = tr.lots.length > 1 && tr.empty != null && tr.empty < P.minEmpty && bcp && last.cpC && kmEntre(last.cpC, bcp) >= P.minEmpty;
+    tr.isEmpty = tr.empty != null && tr.empty >= P.minEmpty && !!last.cpC && !!last.cpL;
+    tr.free = tr.lots.length === 1;
+    // le chantier suivant du camion (contrôle « camion déjà pris »)
+    tr.next = (lotsByTruck.get(tr.truck) || []).filter(l => l.d > tr.end && !tr.lots.includes(l)).sort((a, b) => a.d < b.d ? -1 : 1)[0] || null;
+  });
+  // rapprochements : un trajet qui rentre à vide (A) × un lot d'un autre camion (B) chargeant près de la dernière livraison de A
+  const lotTrip = new Map(); trips.forEach(tr => tr.lots.forEach(l => lotTrip.set(l, tr)));
+  const matches = [], excluded = {}; const exc = w => { excluded[w] = (excluded[w] || 0) + 1; };
+  const cacheSeul = new Map();
+  let evals = 0;
+  const empties = trips.filter(tr => tr.isEmpty);
+  empties.forEach((A, ia) => {
+    const tA = trucks[A.truck];
+    if (onProgress) onProgress(ia, empties.length);
+    if (tA.cap != null && tA.cap <= P.vlMax) return; // les véhicules légers ne font pas de boucle
+    const lastA = A.lots[A.lots.length - 1];
+    lots.forEach(B => {
+      if (B.truck === A.truck || B.km == null || B.km < P.minLoaded || !B.cpC || !B.cpL) return;
+      const gap = dayDiff(A.end, B.d); if (gap < -P.flexB - 2 || gap > P.gapMax + P.flexB + 4) return;   // préfiltre large
+      const tB = trucks[B.truck]; if (!tB.base || !tB.base.cp) return;
+      if (tA.base.key === tB.base.key) return; // retours uniquement : pas d'enchaînement au départ de la même agence
+      // B doit être un départ de sa propre agence : un lot chargé loin de son dépôt est déjà le retour chargé d'un autre camion
+      if (kmEntre(tB.base.cp, B.cpC) > P.minEmpty) return;
+      if (kmEntre(lastA.cpL, B.cpC) > P.detMax) return;
+      const trB = lotTrip.get(B), bSolo = !trB || trB.lots.length === 1;
+      evals++;
+      const ev = evaluerRetour({ A, truck: tA, B: { ...B, agence: tB.base.key, depotCp: tB.base.cp }, bSolo, nextLot: A.next, P, flex: P.flexB, cacheSeul });
+      if (!ev.ok) { exc(ev.why[0]); return; }
+      matches.push(Object.assign({ A, B, type: "inter-agences", bSolo, cap: tA.cap }, ev));
+    });
+  });
+  // tri : ce qui tient au large d'abord, puis le gain
+  matches.sort((a, b) => (a.serre - b.serre) || b.eco - a.eco);
+  // total sans double compte : chaque trajet A et chaque lot B utilisés une fois
+  const usedA = new Set(), usedB = new Set(); let ecoTot = 0, kept = 0;
+  matches.forEach(m => { if (usedA.has(m.A) || usedB.has(m.B)) return; usedA.add(m.A); usedB.add(m.B); m.keep = true; ecoTot += m.eco; kept++; });
+  return {
+    lots, trips, matches, P, evals,
+    kpi: {
+      lots: lots.length, longLots: lots.filter(l => l.km != null && l.km >= P.minLoaded).length, trips: trips.length,
+      emptyTrips: trips.filter(t => t.isEmpty).length, emptyKm: trips.filter(t => t.isEmpty).reduce((s, t) => s + t.empty, 0),
+      loopsDone: trips.filter(t => t.hasReturnLoad).length, matches: matches.length, kept, ecoTot,
+      serres: matches.filter(m => m.keep && m.serre).length, excluded,
+    },
+  };
+}
+
+export const Boucles = {
+  deptOf, parseTrucksSheet, analyse, up, dayDiff, capacityOf, addD, wd, isOff, nomFerie, evaluerRetour, searchRoute, flexDates,
+  DEFAULTS, dureeH, cpProche, cpDe, kmEntre, reglagesMoteur, MOTIF,
+};
+export default Boucles;
