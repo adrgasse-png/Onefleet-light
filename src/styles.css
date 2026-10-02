@@ -127,7 +127,7 @@ code{font-size:.92em}
 
 /* ── Gantt (guidelines § 9) : barre client au-dessus, arrêt en arête du rôle, trajet plein ou hachuré ── */
 .gantt{display:flex;flex-direction:column;gap:6px;overflow-x:auto;padding-bottom:2px}
-.g-row{display:grid;grid-template-columns:118px repeat(var(--n),minmax(52px,1fr));column-gap:2px;row-gap:2px;min-width:calc(118px + var(--n) * 54px)}
+.g-row{display:grid;grid-template-columns:118px repeat(var(--n),minmax(84px,1fr));column-gap:2px;row-gap:2px;min-width:calc(118px + var(--n) * 86px)}
 .g-head{position:sticky;top:0}
 .g-lab{font-size:12px;line-height:1.2;padding:2px 6px 2px 0;align-self:center}.g-lab b{display:block}.g-lab span{color:var(--ink2)}
 .g-d{text-align:center;color:var(--ink2);font-size:11px;padding:2px 0;border-radius:4px}.g-d b{display:block;color:var(--ink);font-size:13px}
@@ -240,16 +240,19 @@ details.rules summary{padding:14px 16px;cursor:pointer;font:700 16px "Barlow Sem
   .io{flex-wrap:wrap}
 }
 
-/* une case du Gantt = une journée 7 h → 18 h ; chaque segment à son créneau réel (tDebut / tFin du moteur) */
-.g-c.tl{position:relative;padding:0;background:var(--bg);overflow:hidden}
-.g-c.tl.ferme{background:var(--closed),var(--bg)}
-.sg{position:absolute;top:0;bottom:0;display:flex;align-items:center;justify-content:center;font:600 10.5px/1.1 "Barlow Semi Condensed",sans-serif;font-style:normal;white-space:nowrap;overflow:hidden}
-.sg.op{font-weight:700}
-.sg.op.anc{background:var(--role-ancre-bg);box-shadow:inset 3px 0 0 var(--role-ancre);color:var(--role-ancre)}
-.sg.op.acc{background:var(--role-acc-bg);box-shadow:inset 3px 0 0 var(--role-acc);color:var(--role-acc-ink)}
-.sg.op.anc.suite{box-shadow:inset 0 -3px 0 var(--role-ancre)}.sg.op.acc.suite{box-shadow:inset 0 -3px 0 var(--role-acc)}
-.sg.pl{background:var(--route-fill);color:var(--route-ink)}
-.sg.vd{background:var(--hatch-void),var(--empty-fill);box-shadow:inset 0 0 0 1px var(--empty-line);color:var(--ink2)}
-.sg.dp{background:var(--ink);color:var(--bg)}
-.sg.dp.ch{box-shadow:inset 0 -3px 0 var(--role-acc)}
-.sg.at{background:var(--warning-bg);color:var(--warning)}
+/* une case du Gantt = une journée, coupée en matin et après-midi (l'axe du moteur v2) */
+.g-d .mam{display:flex;margin-top:2px;border-top:1px solid var(--line)}.g-d .mam em{flex:1;font-style:normal;font-size:9.5px;color:var(--ink3)}
+.g-c.dj{display:grid;grid-template-columns:1fr 1fr;gap:1px;padding:0;background:transparent;align-items:stretch;justify-items:stretch}
+.g-c.dj.ferme{background:var(--closed),var(--bg)}
+.hd{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:0;border-radius:3px;font:600 10.5px/1.1 "Barlow Semi Condensed",sans-serif;font-style:normal;text-align:center;overflow:hidden;background:var(--bg);padding:0 1px}
+.hd small{font-size:9px;font-weight:600;opacity:.85}
+.hd.op{font-weight:700}
+.hd.op.anc{background:var(--role-ancre-bg);box-shadow:inset 3px 0 0 var(--role-ancre);color:var(--role-ancre)}
+.hd.op.acc{background:var(--role-acc-bg);box-shadow:inset 3px 0 0 var(--role-acc);color:var(--role-acc-ink)}
+.hd.op.anc.suite{box-shadow:inset 0 -3px 0 var(--role-ancre)}.hd.op.acc.suite{box-shadow:inset 0 -3px 0 var(--role-acc)}
+.hd.pl{background:var(--route-fill);color:var(--route-ink)}
+.hd.vd{background:var(--hatch-void),var(--empty-fill);box-shadow:inset 0 0 0 1px var(--empty-line);color:var(--ink2)}
+.hd.dp{background:var(--ink);color:var(--bg)}
+.hd.dp.ch{box-shadow:inset 0 -3px 0 var(--role-acc)}
+.hd.at{background:var(--warning-bg);color:var(--warning)}
+.hd.fin{box-shadow:inset -4px 0 0 var(--ink)}

@@ -153,31 +153,32 @@ function segmentsDe(jours) {
   });
   return { segs, pleins };
 }
+/* Deux cases par jour, MATIN et APRÈS-MIDI (l'axe du moteur : jour ouvré j = [2j, 2j + 2[, matin = [2j, 2j + 1[).
+   Chaque demi-journée prend l'activité qui l'occupe : un arrêt CHG / LIV d'abord (le plus long s'il y en a deux),
+   sinon le dépôt, sinon la route — pleine ou hachurée selon ce qui est à bord la plus grande partie du temps. */
+function demiJournee(segs, h0) {
+  const h1 = h0 + 1, rec = s => Math.max(0, Math.min(s.tFin, h1) - Math.max(s.tDebut, h0));
+  const dans = segs.map(s => ({ s, d: rec(s) })).filter(x => x.d > 0.02);
+  if (!dans.length) return null;
+  const tip = dans.map(({ s }) => s.genre === "ROUTE" ? `${s.charge ? "trajet chargé" : "trajet à vide"} ${nf(s.km || 0)} km (${heure(s.tDebut)} → ${heure(s.tFin)})` : s.genre === "DEPOT" ? `dépôt${s.charge ? ", chargé" : ""} dès ${heure(s.tDebut)}` : `${s.genre} ${s.lot} ${heure(s.tDebut)} → ${heure(s.tFin)}`).join(" · ");
+  const ops = dans.filter(x => x.s.genre === "CHG" || x.s.genre === "LIV").sort((x, y) => y.d - x.d);
+  if (ops.length) { const o = ops[0].s, autre = ops.slice(1).map(x => `${x.s.genre} ${x.s.lot}`).filter(t => t !== `${o.genre} ${o.lot}`); return { cls: "op " + (ROLE[o.lot] || "") + (o.tDebut < h0 - 0.02 ? " suite" : ""), txt: `${o.genre} ${o.lot}`, plus: autre[0] || "", tip }; }
+  const dep = dans.find(x => x.s.genre === "DEPOT");
+  const routes = dans.filter(x => x.s.genre === "ROUTE");
+  const plein = routes.filter(x => x.s.charge).reduce((t, x) => t + x.d, 0), vide = routes.filter(x => !x.s.charge).reduce((t, x) => t + x.d, 0);
+  if (dep && dep.d >= Math.max(plein, vide)) return { cls: "dp" + (dep.s.charge ? " ch" : ""), txt: dep.s.charge ? "Dépôt · chargé" : "Dépôt", tip };
+  if (routes.length) { const km = routes.reduce((t, x) => t + (x.s.km || 0) * x.d / Math.max(1e-6, x.s.tFin - x.s.tDebut), 0); return { cls: plein >= vide ? "pl" : "vd", txt: `${nf(km)} km`, tip, fin: !!dep }; }
+  return null;
+}
 function casesJours(jours) {
   const { segs, pleins } = segmentsDe(jours), cells = {};
   (jours || []).forEach(j => {
     const jo = Boucles.jourOuvre(j.date); if (jo == null) return;
-    const t0 = 2 * jo, t1 = t0 + 2, morceaux = [];
-    segs.forEach(s => {
-      const a = Math.max(s.tDebut, t0), z = Math.min(s.tFin, t1);
-      if (z - a < 1e-6) return;
-      const l = (a - t0) / 2 * 100, w = (z - a) / 2 * 100;
-      const suite = s.tDebut < t0 - 1e-6, continue_ = s.tFin > t1 + 1e-6;
-      let cls, txt, tip;
-      if (s.genre === "CHG" || s.genre === "LIV") {
-        cls = "op " + (ROLE[s.lot] || ""); txt = `${s.genre} ${s.lot}`;
-        tip = `${s.genre} ${s.lot} : ${heure(s.tDebut)} → ${heure(s.tFin)}${suite || continue_ ? " (sur deux journées)" : ""}`;
-      } else if (s.genre === "ROUTE") {
-        cls = s.charge ? "pl" : "vd"; txt = s.km ? `${nf(s.km)} km` : "";
-        tip = `${s.charge ? "Trajet chargé" : "Trajet à vide"} vers ${s.vers || "?"} · ${nf(s.km || 0)} km · ${heure(s.tDebut)} → ${heure(s.tFin)}`;
-      } else if (s.genre === "DEPOT") { cls = "dp" + (s.charge ? " ch" : ""); txt = s.charge ? "Dépôt · chargé" : "Dépôt"; tip = `Au dépôt dès ${heure(s.tDebut)}${s.charge ? ", chargé : repart livrer ensuite (règle des 150 km)" : ""}`; }
-      else return;
-      morceaux.push({ l, w, cls: cls + (suite ? " suite" : "") + (continue_ ? " cont" : ""), txt, tip });
-    });
+    let demis = [demiJournee(segs, 2 * jo), demiJournee(segs, 2 * jo + 1)];
     const p = pleins.find(x => x.date === j.date);
-    if (!morceaux.length && p) morceaux.push({ l: 0, w: 100, cls: "dp" + (p.aBord > 0 ? " ch" : ""), txt: p.aBord > 0 ? "Dépôt · chargé" : "Dépôt", tip: p.aBord > 0 ? `Au dépôt, ${nf(p.aBord)} m³ à bord` : "Au dépôt" });
-    if (!morceaux.length) morceaux.push({ l: 0, w: 100, cls: "at", txt: "Attente", tip: "Jour sans activité dans la tournée" });
-    cells[j.date] = { seg: morceaux };
+    const plein = p ? { cls: "dp" + (p.aBord > 0 ? " ch" : ""), txt: p.aBord > 0 ? "Dépôt · chargé" : "Dépôt", tip: p.aBord > 0 ? `Au dépôt, ${nf(p.aBord)} m³ à bord` : "Au dépôt" } : { cls: "at", txt: "Attente", tip: "Demi-journée sans activité dans la tournée" };
+    demis = demis.map(d => d || plein);
+    cells[j.date] = { demis };
   });
   return cells;
 }
@@ -187,7 +188,7 @@ function gantt(rows, from, to) {
   if (!days.length) return "";
   const col = d => days.indexOf(d) + 2;
   const off = d => Boucles.isOff(d);
-  const head = `<div class="g-row g-head"><div class="g-lab"></div>${days.map(d => { const fe = Boucles.nomFerie(d); return `<div class="g-d${off(d) ? " ferme" : ""}"${fe ? ` title="${esc(fe)}"` : ""}>${JW[Boucles.wd(d)]}<b>${new Date(d + "T12:00").getDate()}</b>${fe ? "<i>férié</i>" : ""}</div>`; }).join("")}</div>`;
+  const head = `<div class="g-row g-head"><div class="g-lab"></div>${days.map(d => { const fe = Boucles.nomFerie(d); return `<div class="g-d${off(d) ? " ferme" : ""}"${fe ? ` title="${esc(fe)}"` : ""}>${JW[Boucles.wd(d)]}<b>${new Date(d + "T12:00").getDate()}</b>${fe ? "<i>férié</i>" : ""}<span class="mam"><em>mat.</em><em>a.-m.</em></span></div>`; }).join("")}</div>`;
   const ligne = r => {
     const bands = (r.bandes || []).map(b => {
       const a = b.du < days[0] ? days[0] : b.du, z = b.au > days[days.length - 1] ? days[days.length - 1] : b.au;
@@ -196,13 +197,13 @@ function gantt(rows, from, to) {
     }).join("");
     const cells = days.map((d, i) => {
       const c = r.cells[d], pos = `grid-row:2;grid-column:${i + 2}`;
-      if (c && c.seg) return `<div class="g-c tl${off(d) ? " ferme" : ""}" style="${pos}">${c.seg.map(x => `<i class="sg ${x.cls}${x.w < 30 ? " court" : ""}" style="left:${x.l.toFixed(1)}%;width:${x.w.toFixed(1)}%" title="${esc(x.tip)}">${x.w >= 30 ? esc(x.txt) : ""}</i>`).join("")}</div>`;
+      if (c && c.demis) return `<div class="g-c dj${off(d) ? " ferme" : ""}" style="${pos}">${c.demis.map((x, k) => `<i class="hd ${x.cls}${x.fin ? " fin" : ""}" title="${k ? "Après-midi" : "Matin"} : ${esc(x.tip)}">${esc(x.txt)}${x.plus ? `<small>+ ${esc(x.plus)}</small>` : ""}</i>`).join("")}</div>`;
       return `<div class="g-c${off(d) ? " ferme" : ""}${c ? " " + c.cls : ""}" style="${pos}"${c && c.tip ? ` title="${esc(c.tip)}"` : ""}>${c ? c.html : ""}</div>`;
     }).join("");
     return `<div class="g-row g-truck${r.attenue ? " attenue" : ""}"><div class="g-lab" style="grid-row:1/3"><b>${r.label}</b><span>${r.sub}</span></div>${bands}${cells}</div>`;
   };
   return `<div class="gantt" style="--n:${days.length}">${head}${rows.map(ligne).join("")}</div>
-   <div class="g-key"><span><i class="k op anc"></i>arrêt ANC</span><span><i class="k op acc"></i>arrêt ACC</span><span><i class="k pl"></i>trajet chargé</span><span><i class="k vd"></i>trajet à vide</span><span><i class="k dp"></i>dépôt</span><span class="mut">une case = 7 h → 18 h ; survol : heures du moteur</span><span><i class="k ferme"></i>week-end, férié</span></div>`;
+   <div class="g-key"><span><i class="k op anc"></i>arrêt ANC</span><span><i class="k op acc"></i>arrêt ACC</span><span><i class="k pl"></i>trajet chargé</span><span><i class="k vd"></i>trajet à vide</span><span><i class="k dp"></i>dépôt</span><span class="mut">deux cases par jour : matin, après-midi ; survol : heures du moteur</span><span><i class="k ferme"></i>week-end, férié</span></div>`;
 }
 function bandesDe(r, f, boucle) {
   return ["ANC", "ACC"].map(role => { const b = bornesLot(r, role); if (!b) return null; return { role, du: b[0], au: b[1], nom: f[role].client, titre: `${role} · ${f[role].client} · ${f[role].c}→${f[role].l}`, boucle }; }).filter(Boolean);
