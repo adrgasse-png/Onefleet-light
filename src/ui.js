@@ -206,7 +206,7 @@ function gantt(rows, from, to) {
    <div class="g-key"><span><i class="k op anc"></i>arrêt ANC</span><span><i class="k op acc"></i>arrêt ACC</span><span><i class="k pl"></i>trajet chargé</span><span><i class="k vd"></i>trajet à vide</span><span><i class="k dp"></i>dépôt</span><span class="mut">deux cases par jour : matin, après-midi ; survol : heures du moteur</span><span><i class="k ferme"></i>week-end, férié</span></div>`;
 }
 function bandesDe(r, f, boucle) {
-  return ["ANC", "ACC"].map(role => { const b = bornesLot(r, role); if (!b) return null; return { role, du: b[0], au: b[1], nom: f[role].client, titre: `${role} · ${f[role].client} · ${f[role].c}→${f[role].l}`, boucle }; }).filter(Boolean);
+  return ["ANC", "ACC"].map(role => { const b = bornesLot(r, role); if (!b) return null; return { role, du: b[0], au: b[1], nom: f[role].client + (f[role].vol != null ? ` · ${f[role].vol} m³` : " · volume ?"), titre: `${role} · ${f[role].client} · ${f[role].c}→${f[role].l} · ${f[role].vol != null ? f[role].vol + " m³" : "volume non lu dans le planning"}`, boucle }; }).filter(Boolean);
 }
 function ganttDe(m, f) {
   const rows = [
@@ -249,6 +249,8 @@ const WHY = {
   "volume": "volume > capacité", "détour": "détour", "rendement": "rendement", "gain": "gain trop faible", "CP inconnu": "code postal inconnu", "territoire": "territoire",
 };
 const badge = (ok, yes, no, na) => ok === null || ok === undefined ? `<span class="bdg na">${na}</span>` : ok ? "" : `<span class="bdg ko">${no}</span>`;
+/* le volume d'un lot, ou « ? » quand le planning ne le donne pas (la capacité n'est alors pas contrôlée) */
+const vol = v => v != null ? `<span class="vol">${nf(v)} m³</span>` : `<span class="vol inc" title="Volume non lu dans le planning : la capacité du camion n'est pas contrôlée">? m³</span>`;
 const decal = s => s ? `<span class="bdg ko" title="Chargement de l'accroché déplacé : client à prévenir">CHG ACC ${s > 0 ? "+" : "−"}${Math.abs(s)} j</span>` : "";
 
 /* le parcours, dans l'ordre du camion : Dépôt → CHG ANC → LIV ANC → CHG ACC → LIV ACC → Dépôt */
@@ -275,8 +277,8 @@ function fiche(m, f, carte) {
   return `<div class="f-head">
      <div class="f-km"><b>${nf(m.eco)} km</b><span>évités</span></div>
      <div class="f-roles">
-       <div>${pastille("ANC")} <b>${esc(f.ANC.agence)}</b> · ${esc(f.ANC.client)} <span class="mut">${f.ANC.c}→${f.ANC.l} · ${esc(f.ANC.plaque || "")}${f.cap ? ` · ${f.cap} m³` : ""}</span></div>
-       <div>${pastille("ACC")} <b>${esc(f.ACC.agence)}</b> · ${esc(f.ACC.client)} <span class="mut">${f.ACC.c}→${f.ACC.l}${f.ACC.vol != null ? ` · ${f.ACC.vol} m³` : ""}</span></div>
+       <div>${pastille("ANC")} <b>${esc(f.ANC.agence)}</b> · ${esc(f.ANC.client)} <span class="mut">${f.ANC.c}→${f.ANC.l} · ${esc(f.ANC.plaque || "")}${f.cap ? ` (${f.cap} m³)` : ""}</span>${vol(f.ANC.vol)}</div>
+       <div>${pastille("ACC")} <b>${esc(f.ACC.agence)}</b> · ${esc(f.ACC.client)} <span class="mut">${f.ACC.c}→${f.ACC.l}</span>${vol(f.ACC.vol)}</div>
      </div>
      <div class="f-v">${verdictPill(m)}${m.near ? `<span class="bdg na">piste proche</span>` : ""}</div></div>
    ${ganttDe(m, f)}
@@ -314,9 +316,9 @@ function carteVue() { let out = land(); RES.trips.filter(t => t.isEmpty).forEach
 function carteProp(m, i, f, attr) {
   return `<button class="pc${m.near ? " near" : ""}" ${attr}="${i}" role="option" aria-selected="false">
     <div class="pc-top"><b>${nf(m.eco)} km</b><span class="mut">évités</span>${verdictPill(m)}</div>
-    <div class="pc-l">${pastille("ANC")}<span class="nm">${esc(f.ANC.agence)} · ${esc(f.ANC.client)}</span><span class="dt">LIV ${fdw(m.livAnc)}</span></div>
-    <div class="pc-l">${pastille("ACC")}<span class="nm">${esc(f.ACC.agence)} · ${esc(f.ACC.client)}</span><span class="dt">CHG ${fdw(m.chgAcc)}</span></div>
-    <div class="pc-b"><span class="mut">${f.ANC.l} → ${f.ACC.c} → ${f.ACC.l} · dépôt ${fdw(m.retour)}</span>${decal(m.shift)}${m.coupure ? `<span class="bdg na">week-end au dépôt, chargé</span>` : ""}${badge(m.volOk, "", "volume", "volume ?")}</div>
+    <div class="pc-l">${pastille("ANC")}<span class="nm">${esc(f.ANC.agence)} · ${esc(f.ANC.client)}</span>${vol(f.ANC.vol)}<span class="dt">LIV ${fdw(m.livAnc)}</span></div>
+    <div class="pc-l">${pastille("ACC")}<span class="nm">${esc(f.ACC.agence)} · ${esc(f.ACC.client)}</span>${vol(f.ACC.vol)}<span class="dt">CHG ${fdw(m.chgAcc)}</span></div>
+    <div class="pc-b"><span class="mut">${f.ANC.l} → ${f.ACC.c} → ${f.ACC.l} · dépôt ${fdw(m.retour)}</span>${decal(m.shift)}${m.coupure ? `<span class="bdg na">week-end au dépôt, chargé</span>` : ""}${m.volOk === false ? `<span class="bdg ko">volume > capacité</span>` : ""}</div>
   </button>`;
 }
 
@@ -430,8 +432,8 @@ function emptyView() {
 }
 function ctrlView() {
   $("pane").innerHTML = `<div class="card list"><h2>Contrôle de lecture</h2><p class="meta" style="margin:0 16px 10px">Un planning à 0 chantier lu signale une mise en page différente. Le dépôt de chaque camion vient du référentiel des agences ; à défaut, il est déduit de ses chargements. Le moteur raisonne en codes postaux : celui du dépôt est le plus proche de ses coordonnées.</p>
-   <div class="hscroll"><table><thead><tr><th class="stick">Planning</th><th>Onglets lus</th><th>Camions</th><th>Chantiers lus</th><th>Remarque</th></tr></thead><tbody>
-   ${REPORT.map(r => `<tr><td class="stick"><b>${esc(r.planning)}</b></td><td>${r.tabs.map(esc).join("<br>") || "—"}</td><td class="num">${r.trucks}</td><td class="num">${r.lots}</td><td>${esc(r.err)}</td></tr>`).join("")}</tbody></table></div>
+   <div class="hscroll"><table><thead><tr><th class="stick">Planning</th><th>Onglets lus</th><th>Camions</th><th>Chantiers lus</th><th>Sans volume</th><th>Remarque</th></tr></thead><tbody>
+   ${REPORT.map(r => { const ls = RES.lots.filter(l => l.planning === r.planning), sv = ls.filter(l => l.vol == null).length; return `<tr><td class="stick"><b>${esc(r.planning)}</b></td><td>${r.tabs.map(esc).join("<br>") || "—"}</td><td class="num">${r.trucks}</td><td class="num">${r.lots}</td><td class="num">${sv ? `<span class="bdg na">${sv} / ${ls.length}</span>` : "0"}</td><td>${esc(r.err)}</td></tr>`; }).join("")}</tbody></table></div>
    <h2 style="margin-top:18px">Dépôt retenu par camion</h2><div class="hscroll"><table><thead><tr><th class="stick">Camion</th><th>Planning</th><th>En-tête agence</th><th>Dépôt</th><th>CP moteur</th><th>Source</th></tr></thead><tbody>
    ${RES.trucks.map(t => `<tr><td class="stick">${esc(t.plate || "—")}</td><td>${esc(normP(t.planning))}</td><td>${esc(t.agency)}</td><td>${esc(t.base.label)} (${t.base.dept})</td><td>${esc(t.base.cp)}</td><td>${esc(t.base.how)}</td></tr>`).join("")}
    ${RES.noBase.map(t => `<tr><td class="stick">${esc(t.plate || "—")}</td><td>${esc(normP(t.planning))}</td><td>${esc(t.agency)}</td><td colspan="3" class="meta">dépôt introuvable : camion ignoré</td></tr>`).join("")}</tbody></table></div></div>`;

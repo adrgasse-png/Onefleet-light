@@ -62,6 +62,20 @@ function deptOf(v) {
   if (/^I[- ]/.test(s)) return { intl: true };
   return null;
 }
+/* volume d'un chantier : un nombre, ou un texte « 30 », « 30 m3 », « 30,5 m³ » (saisi en texte dans Excel) */
+function volumeDe(v) {
+  if (typeof v === "number") return v > 0 && v < 500 ? v : null;
+  if (typeof v !== "string") return null;
+  const m = v.trim().match(/^(\d{1,3}(?:[.,]\d+)?)\s*(?:m3|m³|m)?$/i);
+  return m ? parseFloat(m[1].replace(",", ".")) : null;
+}
+/* effectif : « 2 », « 2 ETP », « 3 pers » */
+function effectifDe(v) {
+  if (typeof v === "number") return v > 0 && v < 20 ? v : null;
+  if (typeof v !== "string") return null;
+  const m = v.trim().match(/^(\d{1,2})\s*(?:etp|pers\.?|dem\.?)?$/i);
+  return m ? +m[1] : null;
+}
 /* capacité en m³ lue dans l'en-tête camion : « EY 441 WT 50H+50 » = 50 + 50 (remorque) ; « … 20 » = 20 m³ */
 function capacityOf(h) {
   if (!h) return null;
@@ -273,7 +287,7 @@ function parseTrucksSheet(X, ws, planning) {
           const dc = deptOf(a), dl = deptOf(b2); const cli = lines[i + 1] && lines[i + 1][0];
           if (dc && dl && typeof cli === "string" && cli.trim() && deptOf(cli) === null) {
             if (/^SUITE\b/.test(up(cli))) { text.push("suite"); i += 2; continue; } // jour de suite d'un chantier déjà lu
-            const vol = lines[i + 2] && typeof lines[i + 2][0] === "number" ? lines[i + 2][0] : null, etp = lines[i + 2] && typeof lines[i + 2][1] === "number" ? lines[i + 2][1] : null;
+            const vol = lines[i + 2] ? volumeDe(lines[i + 2][0]) : null, etp = lines[i + 2] ? effectifDe(lines[i + 2][1]) : null;
             lot = { c: dc, l: dl, cRaw: a, lRaw: b2, prest: typeof lines[i][2] === "string" ? lines[i][2].trim() : "", client: cli.trim(), vol, etp }; i += 2; continue;
           }
         }
@@ -301,7 +315,8 @@ function analyse(trucks, { centroids, baseOf, params, onProgress }) {
       if (!x.lot) return;
       const L = x.lot, k = up(L.client) + "|" + (L.c.dom || L.c.intl ? "X" : L.c) + "|" + (L.l.dom || L.l.intl ? "X" : L.l);
       const p = seen.get(k);
-      if (p && dayDiff(p.d2, x.d) <= 2) { p.d2 = x.d; x.dup = p; return; }
+      // même chantier sur plusieurs jours : un seul lot ; un volume ou un effectif notés seulement un autre jour sont repris
+      if (p && dayDiff(p.d2, x.d) <= 2) { p.d2 = x.d; x.dup = p; if (p.vol == null && L.vol != null) p.vol = L.vol; if (p.etp == null && L.etp != null) p.etp = L.etp; return; }
       const c = L.c === "BASE" ? (base && base.dept) : L.c, l = L.l === "BASE" ? (base && base.dept) : L.l;
       const cpC = L.c === "BASE" ? base && base.cp : cpOf(L.cRaw, c), cpL = L.l === "BASE" ? base && base.cp : cpOf(L.lRaw, l);
       const o = { id: lots.length, truck: ti, planning: t.planning, agency: t.agency, plate: t.plate, d: x.d, d2: x.d, client: L.client, c, l, cpC, cpL, vol: L.vol, etp: L.etp, prest: L.prest, km: cpC && cpL ? kmEntre(cpC, cpL) : null };
@@ -377,6 +392,6 @@ function analyse(trucks, { centroids, baseOf, params, onProgress }) {
 
 export const Boucles = {
   deptOf, parseTrucksSheet, analyse, up, dayDiff, capacityOf, addD, wd, isOff, nomFerie, jourOuvre, evaluerRetour, searchRoute, flexDates,
-  DEFAULTS, dureeH, cpProche, cpDe, kmEntre, reglagesMoteur, MOTIF,
+  DEFAULTS, dureeH, volumeDe, cpProche, cpDe, kmEntre, reglagesMoteur, MOTIF,
 };
 export default Boucles;

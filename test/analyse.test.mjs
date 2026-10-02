@@ -77,3 +77,14 @@ test("camion déjà pris : le chantier suivant du camion A est jugé par evaluer
   assert.equal(ev.ok, false);
   assert.deepEqual(ev.why, ["camion pris"]);
 });
+
+test("volume lu dans le planning : nombre, texte « 30 m3 », ou noté un autre jour du même chantier", () => {
+  assert.equal(Boucles.volumeDe(30), 30);
+  assert.equal(Boucles.volumeDe("30 m3"), 30);
+  assert.equal(Boucles.volumeDe("12,5 m³"), 12.5);
+  assert.equal(Boucles.volumeDe("DUPONT"), null);
+  const T = camions();
+  T[1].days[0].lot.vol = null;   // volume noté seulement le jour de la livraison
+  const R = Boucles.analyse(T, { centroids: CENT, baseOf: t => BASES[t.b], params: {} });
+  assert.equal(R.lots.find(l => l.client === "MARTIN").vol, 15);
+});
