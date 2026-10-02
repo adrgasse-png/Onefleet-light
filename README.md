@@ -58,13 +58,13 @@ réglages et ses entrées :
 
 ## Points à trancher
 
-1. 🔴 **Anomalie du moteur à remonter à OneFleet : la rallonge du rendement (G5) ignore les abaques.**
-   `g2g5Tournee` (`moteur/engine/jour/gardes.js`) calcule `rallongeJ = (détour / 70 + manutAccroche(lot)) / HEURES_JOUR` :
-   la journée est la constante 11 h (pas `reglages.heuresJour`), et `manutAccroche` lit `lot.vol`, alors que les
-   lots du module portent `volume` — elle compte donc toujours le plancher, 2 h + 2 h. Vérifié : un accroché
-   de 5 m³ (2 h par opération) et un de 60 m³ (14 h) ont la même rallonge, 0,412 jour pour 37 km de détour.
-   Conséquence : G5 est plus permissif qu'il ne devrait sur les gros volumes. Non corrigé ici (le moteur
-   n'est pas modifié).
+1. 🔴 **Anomalie du moteur à remonter à OneFleet : la rallonge du rendement (G5) ignore les durées passées.**
+   `g2g5Tournee` (`moteur/engine/jour/gardes.js`, l. 139) calcule `rallongeJ = (détour / 70 + manutAccroche(lot)) / HEURES_JOUR` :
+   la manutention est recalculée avec l'ancienne abaque du moteur (`manutHeures` : 10 m³/h par ETP, plancher 2 h)
+   au lieu de lire `dureeH`, et la journée est la constante 11 h au lieu de `reglages.heuresJour`. Vérifié : 5, 15 et
+   60 m³ → 0,412 j ; 41 m³ → 0,775 j (au-delà de 50 m³ l'équipe supposée passe à 3, la rallonge baisse). G5 est
+   donc trop permissif sur les gros volumes et ne suit pas les abaques. Fiche détaillée partagée avec l'équipe
+   OneFleet (reproduction, cause, correction proposée). Non corrigé ici (le moteur n'est pas modifié).
 2. **Rendement minimum 300 km/j** (OneFleet : 750). Choix du POC, calé sur les retours de Metz 2025 avec
    l'ancienne manutention terrain (20 m³ par personne et par jour, toutes prestations) : à revoir avec les
    nouvelles abaques, et une fois G5 corrigé.
