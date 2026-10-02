@@ -130,26 +130,54 @@ function bornesLot(r, lot) {
   const js = (r.jours || []).filter(j => (j.activites || []).some(a => (a.genre === "CHG" || a.genre === "LIV") && a.lot === lot)).map(j => j.date);
   return js.length ? [js[0], js[js.length - 1]] : null;
 }
-/* une case par jour, lue dans `jours[]` du moteur : l'arrêt d'abord (arête du rôle), sinon le trajet (plein ou à vide), sinon le dépôt */
+/* Les segments du camion, à l'heure près : `tDebut` / `tFin` du moteur, sur l'axe des demi-journées
+   (jour ouvré j = [2j, 2j + 2[, soit 7 h → 18 h). Une livraison qui déborde sur le lendemain matin figure
+   dans `jours[]` aux deux dates : on la dédoublonne et on ne dessine que son créneau réel. Le reste de la
+   journée est de la route, chargée ou à vide selon ce qui est à bord à ce moment-là. */
+const HJ = 11, H0 = 7;
+const heure = t => { const h = H0 + (t - 2 * Math.floor(t / 2)) / 2 * HJ, hh = Math.floor(h + 1e-6), mm = Math.round((h - hh) * 60); return `${hh} h ${String(mm === 60 ? 0 : mm).padStart(2, "0")}`; };
+function segmentsDe(jours) {
+  const vus = new Map(), pleins = [];
+  (jours || []).forEach(j => (j.activites || []).forEach(a => {
+    if (a.tDebut == null || a.tFin == null) { if (a.genre === "DEPOT" || a.genre === "VIDE") pleins.push({ date: j.date, a, aBord: j.aBord }); return; }
+    const k = `${a.genre}|${a.lot || ""}|${a.vers || ""}|${a.tDebut}`;
+    if (!vus.has(k)) vus.set(k, { ...a });
+  }));
+  const segs = [...vus.values()].sort((x, y) => x.tDebut - y.tDebut || x.tFin - y.tFin);
+  // à bord : un lot monte à la fin de son CHG, descend au début de sa LIV
+  const bord = new Set();
+  segs.forEach(s => {
+    if (s.genre === "ROUTE" || s.genre === "DEPOT") s.charge = bord.size > 0;
+    if (s.genre === "CHG") bord.add(s.lot);
+    if (s.genre === "LIV") bord.delete(s.lot);
+  });
+  return { segs, pleins };
+}
 function casesJours(jours) {
-  const cells = {};
+  const { segs, pleins } = segmentsDe(jours), cells = {};
   (jours || []).forEach(j => {
-    const acts = j.activites || [];
-    const ops = acts.filter(a => a.genre === "CHG" || a.genre === "LIV");
-    const routes = acts.filter(a => a.genre === "ROUTE");
-    const depot = acts.find(a => a.genre === "DEPOT");
-    const km = routes.reduce((s, a) => s + (a.km || 0), 0);
-    if (ops.length) {
-      const vus = []; ops.forEach(a => { const t = `${a.genre} ${a.lot}`; if (!vus.includes(t)) vus.push(t); });
-      const last = ops[ops.length - 1];
-      cells[j.date] = { html: vus.map(t => `<span>${t}</span>`).join(""), cls: "op " + (ROLE[last.lot] || ""), tip: vus.join(" · ") + (km ? ` · route ${nf(km)} km` : "") + (depot ? " · retour au dépôt" : "") };
-    } else if (routes.length) {
-      const plein = j.aBord > 0;
-      cells[j.date] = { html: `${nf(km)} km`, cls: plein ? "pl" : "vd", tip: `${plein ? `Trajet chargé (${nf(j.aBord)} m³)` : "Trajet à vide"} · ${nf(km)} km${depot ? " · retour au dépôt" : ""}` };
-    } else if (depot) {
-      cells[j.date] = { html: j.aBord > 0 ? "Dépôt · chargé" : "Dépôt", cls: "dp" + (j.aBord > 0 ? " ch" : ""), tip: j.aBord > 0 ? `Au dépôt, ${nf(j.aBord)} m³ à bord` : "Au dépôt" };
-    } else cells[j.date] = { html: "Attente", cls: "at", tip: "Jour sans activité dans la tournée" };
-    if (depot && !cells[j.date].cls.startsWith("dp")) cells[j.date].fin = true;
+    const jo = Boucles.jourOuvre(j.date); if (jo == null) return;
+    const t0 = 2 * jo, t1 = t0 + 2, morceaux = [];
+    segs.forEach(s => {
+      const a = Math.max(s.tDebut, t0), z = Math.min(s.tFin, t1);
+      if (z - a < 1e-6) return;
+      const l = (a - t0) / 2 * 100, w = (z - a) / 2 * 100;
+      const suite = s.tDebut < t0 - 1e-6, continue_ = s.tFin > t1 + 1e-6;
+      let cls, txt, tip;
+      if (s.genre === "CHG" || s.genre === "LIV") {
+        cls = "op " + (ROLE[s.lot] || ""); txt = `${s.genre} ${s.lot}`;
+        tip = `${s.genre} ${s.lot} : ${heure(s.tDebut)} → ${heure(s.tFin)}${suite || continue_ ? " (sur deux journées)" : ""}`;
+      } else if (s.genre === "ROUTE") {
+        cls = s.charge ? "pl" : "vd"; txt = s.km ? `${nf(s.km)} km` : "";
+        tip = `${s.charge ? "Trajet chargé" : "Trajet à vide"} vers ${s.vers || "?"} · ${nf(s.km || 0)} km · ${heure(s.tDebut)} → ${heure(s.tFin)}`;
+      } else if (s.genre === "DEPOT") { cls = "dp" + (s.charge ? " ch" : ""); txt = s.charge ? "Dépôt · chargé" : "Dépôt"; tip = `Au dépôt dès ${heure(s.tDebut)}${s.charge ? ", chargé : repart livrer ensuite (règle des 150 km)" : ""}`; }
+      else return;
+      morceaux.push({ l, w, cls: cls + (suite ? " suite" : "") + (continue_ ? " cont" : ""), txt, tip });
+    });
+    const p = pleins.find(x => x.date === j.date);
+    if (!morceaux.length && p) morceaux.push({ l: 0, w: 100, cls: "dp" + (p.aBord > 0 ? " ch" : ""), txt: p.aBord > 0 ? "Dépôt · chargé" : "Dépôt", tip: p.aBord > 0 ? `Au dépôt, ${nf(p.aBord)} m³ à bord` : "Au dépôt" });
+    if (!morceaux.length) morceaux.push({ l: 0, w: 100, cls: "at", txt: "Attente", tip: "Jour sans activité dans la tournée" });
+    cells[j.date] = { seg: morceaux };
   });
   return cells;
 }
@@ -166,11 +194,15 @@ function gantt(rows, from, to) {
       if (a > z || col(a) < 2) return "";
       return `<div class="g-band ${b.boucle ? "bcl" : ""}" style="grid-row:1;grid-column:${col(a)}/${col(z) + 1}" title="${esc(b.titre)}">${pastille(b.role)}<span>${esc(b.nom)}</span></div>`;
     }).join("");
-    const cells = days.map((d, i) => { const c = r.cells[d]; return `<div class="g-c${off(d) ? " ferme" : ""}${c ? " " + c.cls : ""}${c && c.fin ? " fin" : ""}" style="grid-row:2;grid-column:${i + 2}"${c && c.tip ? ` title="${esc(c.tip)}"` : ""}>${c ? c.html : ""}</div>`; }).join("");
+    const cells = days.map((d, i) => {
+      const c = r.cells[d], pos = `grid-row:2;grid-column:${i + 2}`;
+      if (c && c.seg) return `<div class="g-c tl${off(d) ? " ferme" : ""}" style="${pos}">${c.seg.map(x => `<i class="sg ${x.cls}${x.w < 30 ? " court" : ""}" style="left:${x.l.toFixed(1)}%;width:${x.w.toFixed(1)}%" title="${esc(x.tip)}">${x.w >= 30 ? esc(x.txt) : ""}</i>`).join("")}</div>`;
+      return `<div class="g-c${off(d) ? " ferme" : ""}${c ? " " + c.cls : ""}" style="${pos}"${c && c.tip ? ` title="${esc(c.tip)}"` : ""}>${c ? c.html : ""}</div>`;
+    }).join("");
     return `<div class="g-row g-truck${r.attenue ? " attenue" : ""}"><div class="g-lab" style="grid-row:1/3"><b>${r.label}</b><span>${r.sub}</span></div>${bands}${cells}</div>`;
   };
   return `<div class="gantt" style="--n:${days.length}">${head}${rows.map(ligne).join("")}</div>
-   <div class="g-key"><span><i class="k op anc"></i>arrêt ANC</span><span><i class="k op acc"></i>arrêt ACC</span><span><i class="k pl"></i>trajet chargé</span><span><i class="k vd"></i>trajet à vide</span><span><i class="k dp"></i>dépôt</span><span><i class="k ferme"></i>week-end, férié</span></div>`;
+   <div class="g-key"><span><i class="k op anc"></i>arrêt ANC</span><span><i class="k op acc"></i>arrêt ACC</span><span><i class="k pl"></i>trajet chargé</span><span><i class="k vd"></i>trajet à vide</span><span><i class="k dp"></i>dépôt</span><span class="mut">une case = 7 h → 18 h ; survol : heures du moteur</span><span><i class="k ferme"></i>week-end, férié</span></div>`;
 }
 function bandesDe(r, f, boucle) {
   return ["ANC", "ACC"].map(role => { const b = bornesLot(r, role); if (!b) return null; return { role, du: b[0], au: b[1], nom: f[role].client, titre: `${role} · ${f[role].client} · ${f[role].c}→${f[role].l}`, boucle }; }).filter(Boolean);

@@ -239,3 +239,17 @@ details.rules summary{padding:14px 16px;cursor:pointer;font:700 16px "Barlow Sem
   .navrow{flex-direction:column}
   .io{flex-wrap:wrap}
 }
+
+/* une case du Gantt = une journée 7 h → 18 h ; chaque segment à son créneau réel (tDebut / tFin du moteur) */
+.g-c.tl{position:relative;padding:0;background:var(--bg);overflow:hidden}
+.g-c.tl.ferme{background:var(--closed),var(--bg)}
+.sg{position:absolute;top:0;bottom:0;display:flex;align-items:center;justify-content:center;font:600 10.5px/1.1 "Barlow Semi Condensed",sans-serif;font-style:normal;white-space:nowrap;overflow:hidden}
+.sg.op{font-weight:700}
+.sg.op.anc{background:var(--role-ancre-bg);box-shadow:inset 3px 0 0 var(--role-ancre);color:var(--role-ancre)}
+.sg.op.acc{background:var(--role-acc-bg);box-shadow:inset 3px 0 0 var(--role-acc);color:var(--role-acc-ink)}
+.sg.op.anc.suite{box-shadow:inset 0 -3px 0 var(--role-ancre)}.sg.op.acc.suite{box-shadow:inset 0 -3px 0 var(--role-acc)}
+.sg.pl{background:var(--route-fill);color:var(--route-ink)}
+.sg.vd{background:var(--hatch-void),var(--empty-fill);box-shadow:inset 0 0 0 1px var(--empty-line);color:var(--ink2)}
+.sg.dp{background:var(--ink);color:var(--bg)}
+.sg.dp.ch{box-shadow:inset 0 -3px 0 var(--role-acc)}
+.sg.at{background:var(--warning-bg);color:var(--warning)}

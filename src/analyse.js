@@ -6,7 +6,7 @@
      ou de capacité n'est réécrite ici : on décrit la tournée, le moteur rend le verdict.
    Fonctionne dans le navigateur (bundle IIFE `Boucles`) et sous Node (tests). */
 import {
-  evaluerTournee, evaluerPlanning, kmEntre, kmLotSeul, estJourFerme, nomFerie,
+  evaluerTournee, evaluerPlanning, kmEntre, kmLotSeul, estJourFerme, nomFerie, jourOuvre,
 } from "../moteur/engine/jour/index.js";
 import { GPS, cpConnu } from "../moteur/data/gps.js";
 import { manutHeures } from "../moteur/data/referentiels.js";
@@ -376,7 +376,7 @@ function analyse(trucks, { centroids, baseOf, params, onProgress }) {
 }
 
 export const Boucles = {
-  deptOf, parseTrucksSheet, analyse, up, dayDiff, capacityOf, addD, wd, isOff, nomFerie, evaluerRetour, searchRoute, flexDates,
+  deptOf, parseTrucksSheet, analyse, up, dayDiff, capacityOf, addD, wd, isOff, nomFerie, jourOuvre, evaluerRetour, searchRoute, flexDates,
   DEFAULTS, dureeH, cpProche, cpDe, kmEntre, reglagesMoteur, MOTIF,
 };
 export default Boucles;
